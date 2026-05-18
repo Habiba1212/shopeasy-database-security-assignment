@@ -8,39 +8,52 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     exit();
 }
 
-$owner_name = $pdo->query("SELECT full_name FROM user WHERE user_id = {$_SESSION['user_id']}")->fetchColumn();
+// --- FETCH LIVE DATA FROM HABIBA'S DATABASE ---
 
-// --- HANDLE FORM SUBMISSIONS (Task 2 Requirement) ---
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    if (isset($_POST['add_product'])) {
-        // 1. Insert into Product table
-        $stmt = $pdo->prepare("INSERT INTO product (product_name, price, is_active) VALUES (?, ?, 1)");
-        $stmt->execute([$_POST['new_name'], $_POST['new_price']]);
-        $new_product_id = $pdo->lastInsertId();
-        
-        // 2. Create a blank inventory record for it
-        $stmt2 = $pdo->prepare("INSERT INTO inventory (product_id, quantity_available) VALUES (?, 0)");
-        $stmt2->execute([$new_product_id]);
-        
-    } elseif (isset($_POST['delete_product'])) {
-        // Habiba's DB uses CASCADE, so deleting the product also deletes its inventory!
-        $stmt = $pdo->prepare("DELETE FROM product WHERE product_id = ?");
-        $stmt->execute([$_POST['delete_id']]);
-    }
-    // Refresh to prevent duplicate form submissions
-    header("Location: admin_products.php");
-    exit();
-}
+// 1. Get Owner Name
+$stmt = $pdo->prepare("SELECT full_name FROM user WHERE user_id = ?");
+$stmt->execute([$_SESSION['user_id']]);
+$owner_name = $stmt->fetchColumn();
 
-// Fetch all Products
-$products = $pdo->query("SELECT product_id, product_name, price, is_active, created_at FROM product ORDER BY created_at DESC")->fetchAll();
+// 2. Dashboard Metrics
+$orders_today = $pdo->query("SELECT COUNT(*) FROM orders WHERE DATE(ordered_at) = CURDATE()")->fetchColumn();
+$monthly_revenue = $pdo->query("SELECT SUM(total_amount) FROM orders WHERE MONTH(ordered_at) = MONTH(CURDATE()) AND YEAR(ordered_at) = YEAR(CURDATE())")->fetchColumn() ?: 0;
+$active_drivers = $pdo->query("SELECT COUNT(*) FROM user_role WHERE role_id = 3")->fetchColumn();
+$total_customers = $pdo->query("SELECT COUNT(*) FROM user_role WHERE role_id = 2")->fetchColumn();
+
+// 3. Recent Orders
+$recent_orders = $pdo->query("
+    SELECT o.order_id, u.full_name as customer, o.total_amount, o.order_status, 
+           (SELECT SUM(quantity) FROM order_item WHERE order_id = o.order_id) as items
+    FROM orders o
+    JOIN user u ON o.customer_id = u.user_id
+    ORDER BY o.ordered_at DESC LIMIT 5
+")->fetchAll();
+
+// 4. Stock Alerts (Products with 5 or less in inventory)
+$stock_alerts = $pdo->query("
+    SELECT p.product_name, i.quantity_available 
+    FROM product p 
+    JOIN inventory i ON p.product_id = i.product_id 
+    WHERE i.quantity_available <= 5 AND p.is_active = 1
+")->fetchAll();
+
+// 5. Driver Status
+$drivers = $pdo->query("
+    SELECT u.full_name, 
+           IFNULL((SELECT delivery_status FROM delivery WHERE driver_id = u.user_id AND delivery_status != 'delivered' LIMIT 1), 'Available') as status
+    FROM user u
+    JOIN user_role ur ON u.user_id = ur.user_id
+    WHERE ur.role_id = 3
+")->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>ShopEasy - Products</title>
+<title>ShopEasy - Admin Dashboard</title>
 <style>
+  /*UI CSS */
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 30px; }
   h1 { text-align: center; font-size: 20px; color: #1a1a2e; margin-bottom: 8px; }
@@ -55,22 +68,29 @@ $products = $pdo->query("SELECT product_id, product_name, price, is_active, crea
   .side-menu { background: #1a1a2e; border-radius: 10px; padding: 12px; height: fit-content; }
   .side-item { padding: 8px 12px; font-size: 13px; border-radius: 6px; margin-bottom: 3px; cursor: pointer; color: #aaa; }
   .side-item.active { background: #185FA5; color: #fff; font-weight: bold; }
+  .metrics-row { display: flex; gap: 12px; margin-bottom: 14px; }
+  .metric { flex: 1; background: #f0f4ff; border-radius: 8px; padding: 14px; border: 1px solid #e0e8f5; }
+  .metric-label { font-size: 11px; color: #555; margin-bottom: 4px; font-weight: bold; text-transform: uppercase;}
+  .metric-value { font-size: 22px; font-weight: bold; color: #1a1a2e; }
   .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 16px; margin-bottom: 14px; }
-  .card-title { font-size: 16px; font-weight: bold; color: #1a1a2e; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #eee;}
+  .card-title { font-size: 14px; font-weight: bold; color: #1a1a2e; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #eee;}
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { background: #f5f5f5; text-align: left; padding: 10px; font-size: 12px; color: #555; border-bottom: 1px solid #ddd; }
-  td { padding: 10px; border-bottom: 1px solid #eee; color: #333; }
-  .badge { display: inline-block; font-size: 11px; padding: 4px 10px; border-radius: 20px; font-weight: bold; background: #d4edda; color: #155724; }
-  .btn { padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; color: #fff; }
-  .btn-blue { background: #185FA5; }
-  .btn-red { background: #dc3545; }
-  .form-row { display: flex; gap: 10px; margin-bottom: 15px; }
-  .form-row input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; flex: 1; }
+  th { background: #f5f5f5; text-align: left; padding: 8px 10px; font-size: 12px; color: #555; border-bottom: 1px solid #ddd; }
+  td { padding: 8px 10px; border-bottom: 1px solid #eee; color: #333; }
+  .badge { display: inline-block; font-size: 11px; padding: 3px 9px; border-radius: 20px; font-weight: bold; }
+  .badge-success { background: #d4edda; color: #155724; }
+  .badge-warn { background: #fff3cd; color: #856404; }
+  .badge-info { background: #d1ecf1; color: #0c5460; }
+  .badge-danger { background: #f8d7da; color: #721c24; }
+  .list-row { display:flex; justify-content:space-between; font-size:13px; padding:8px 0; border-bottom:1px solid #eee; }
+  .list-row:last-child { border-bottom: none; }
 </style>
 </head>
 <body>
-<h1>ShopEasy — Admin Panel</h1>
-<p class="subtitle">Product Catalog Management</p>
+
+<h1>ShopEasy — Admin Dashboard</h1>
+<p class="subtitle">Live Database View</p>
+
 <div class="screen">
   <div class="navbar">
     <span class="nav-brand">ShopEasy Admin Panel</span>
@@ -90,44 +110,81 @@ $products = $pdo->query("SELECT product_id, product_name, price, is_active, crea
   <a href="admin_customers.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_customers.php') ? 'active' : ''; ?>">Customers</div></a>
 </div>
       <div>
-        <div class="card" style="background: #f8f9fa;">
-          <div class="card-title">Add New Product</div>
-          <form method="POST" action="admin_products.php" class="form-row">
-            <input type="text" name="new_name" placeholder="Product Name" required>
-            <input type="number" name="new_price" step="0.01" placeholder="Price (RM)" required>
-            <button type="submit" name="add_product" class="btn btn-blue">+ Add Product</button>
-          </form>
+        <div class="metrics-row">
+          <div class="metric"><div class="metric-label">Orders Today</div><div class="metric-value"><?php echo $orders_today; ?></div></div>
+          <div class="metric"><div class="metric-label">Monthly Revenue</div><div class="metric-value">RM <?php echo number_format($monthly_revenue, 2); ?></div></div>
+          <div class="metric"><div class="metric-label">Active Drivers</div><div class="metric-value"><?php echo $active_drivers; ?></div></div>
+          <div class="metric"><div class="metric-label">Total Customers</div><div class="metric-value"><?php echo $total_customers; ?></div></div>
         </div>
 
         <div class="card">
-          <div class="card-title">Product Catalog</div>
+          <div class="card-title">Recent Orders</div>
           <table>
             <thead>
-              <tr><th>ID</th><th>Product Name</th><th>Price</th><th>Status</th><th>Action</th></tr>
+              <tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Amount</th><th>Status</th></tr>
             </thead>
             <tbody>
               <?php
-              foreach ($products as $p) {
-                  echo "<tr>
-                          <td>#{$p['product_id']}</td>
-                          <td><strong>" . htmlspecialchars($p['product_name']) . "</strong></td>
-                          <td>RM " . number_format($p['price'], 2) . "</td>
-                          <td><span class='badge'>Active</span></td>
-                          <td>
-                            <form method='POST' action='admin_products.php' style='display:inline;'>
-                              <input type='hidden' name='delete_id' value='{$p['product_id']}'>
-                              <button type='submit' name='delete_product' class='btn btn-red'>Delete</button>
-                            </form>
-                          </td>
-                        </tr>";
+              if (count($recent_orders) > 0) {
+                  foreach ($recent_orders as $order) {
+                      // Color code the badges based on status
+                      $badge = 'badge-info';
+                      if ($order['order_status'] == 'processing') $badge = 'badge-warn';
+                      if ($order['order_status'] == 'delivered') $badge = 'badge-success';
+                      if ($order['order_status'] == 'cancelled') $badge = 'badge-danger';
+
+                      echo "<tr>
+                              <td>#{$order['order_id']}</td>
+                              <td>" . htmlspecialchars($order['customer']) . "</td>
+                              <td>{$order['items']} items</td>
+                              <td>RM " . number_format($order['total_amount'], 2) . "</td>
+                              <td><span class='badge {$badge}'>" . ucfirst($order['order_status']) . "</span></td>
+                            </tr>";
+                  }
+              } else {
+                  echo "<tr><td colspan='5' style='text-align:center;'>No orders found.</td></tr>";
               }
               ?>
             </tbody>
           </table>
         </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+          <div class="card">
+            <div class="card-title">Stock Alerts</div>
+            <?php
+            if (count($stock_alerts) > 0) {
+                foreach ($stock_alerts as $alert) {
+                    $badge = $alert['quantity_available'] <= 0 ? 'badge-danger' : 'badge-warn';
+                    echo "<div class='list-row'>
+                            <span>" . htmlspecialchars($alert['product_name']) . "</span>
+                            <span class='badge {$badge}'>{$alert['quantity_available']} left</span>
+                          </div>";
+                }
+            } else {
+                echo "<div class='list-row'>All stock levels are healthy!</div>";
+            }
+            ?>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Driver Status</div>
+            <?php
+            foreach ($drivers as $driver) {
+                $badge = $driver['status'] == 'Available' ? 'badge-success' : 'badge-warn';
+                echo "<div class='list-row'>
+                        <span>" . htmlspecialchars($driver['full_name']) . "</span>
+                        <span class='badge {$badge}'>{$driver['status']}</span>
+                      </div>";
+            }
+            ?>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
 </div>
+
 </body>
 </html>
