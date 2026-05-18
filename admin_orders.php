@@ -9,6 +9,8 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
 }
 
 $owner_name = $_SESSION['full_name'] ?? 'Admin';
+$success_msg = '';
+$error_msg = '';
 
 // --- HANDLE DRIVER ASSIGNMENT ---
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['assign_driver'])) {
@@ -32,10 +34,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['assign_driver'])) {
         $update_stmt->execute([$order_id]);
 
         $pdo->commit();
-        $success_msg = "Order #$order_id successfully dispatched to Driver #$driver_id!";
+        $success_msg = "<div class='msg-success'>Order #$order_id successfully dispatched to Driver #$driver_id!</div>";
     } catch (Exception $e) {
         $pdo->rollBack();
-        $error_msg = "Assignment failed. Order might already be assigned.";
+        $error_msg = "<div class='error-msg'>Assignment failed. Order might already be assigned.</div>";
     }
 }
 
@@ -80,6 +82,7 @@ $available_drivers = $drivers_stmt->fetchAll();
   .side-item.active { background: #185FA5; color: #fff; font-weight: bold; }
   .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 16px; margin-bottom: 14px; }
   .card-title { font-size: 16px; font-weight: bold; color: #1a1a2e; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #eee;}
+  
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th { background: #f5f5f5; text-align: left; padding: 10px; font-size: 12px; color: #555; border-bottom: 1px solid #ddd; }
   td { padding: 10px; border-bottom: 1px solid #eee; color: #333; vertical-align: middle; }
@@ -87,10 +90,11 @@ $available_drivers = $drivers_stmt->fetchAll();
   .badge { display: inline-block; font-size: 11px; padding: 4px 10px; border-radius: 20px; font-weight: bold; }
   .badge-warn { background: #fff3cd; color: #856404; }
   
-  .dispatch-form { display: flex; gap: 8px; align-items: center; }
+  .dispatch-form { display: flex; gap: 8px; align-items: center; margin: 0; }
   .dispatch-select { padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; }
   .btn-assign { background: #185FA5; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: bold; }
   .msg-success { background: #d4edda; color: #155724; padding: 10px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; border: 1px solid #c3e6cb;}
+  .error-msg { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 6px; margin-bottom: 14px; font-size: 13px; border: 1px solid #f5c6cb;}
 </style>
 </head>
 <body>
@@ -106,19 +110,22 @@ $available_drivers = $drivers_stmt->fetchAll();
   </div>
   <div class="content">
     <div class="sidebar-layout">
+      
       <div class="side-menu">
-        <a href="admin_dashboard.php"><div class="side-item">Dashboard</div></a>
-        <a href="admin_orders.php"><div class="side-item active">Orders</div></a>
-        <a href="#"><div class="side-item">Products</div></a>
-        <a href="#"><div class="side-item">Stock</div></a>
-        <a href="admin_drivers.php"><div class="side-item">Drivers</div></a>
-        <a href="admin_customers.php"><div class="side-item">Customers</div></a>
+        <a href="admin_dashboard.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_dashboard.php') ? 'active' : ''; ?>">Dashboard</div></a>
+        <a href="admin_orders.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_orders.php') ? 'active' : ''; ?>">Orders</div></a>
+        <a href="admin_products.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_products.php') ? 'active' : ''; ?>">Products</div></a>
+        <a href="admin_stock.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_stock.php') ? 'active' : ''; ?>">Stock</div></a>
+        <a href="admin_drivers.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_drivers.php') ? 'active' : ''; ?>">Drivers</div></a>
+        <a href="admin_customers.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_customers.php') ? 'active' : ''; ?>">Customers</div></a>
       </div>
+
       <div>
         <div class="card">
           <div class="card-title">Pending Orders Requiring Dispatch</div>
           
-          <?php if(isset($success_msg)) echo "<div class='msg-success'>$success_msg</div>"; ?>
+          <?php echo $success_msg; ?>
+          <?php echo $error_msg; ?>
 
           <table>
             <thead>
@@ -134,7 +141,7 @@ $available_drivers = $drivers_stmt->fetchAll();
                   <?php foreach ($pending_orders as $order): ?>
                       <tr>
                         <td><strong>#<?php echo $order['order_id']; ?></strong><br><span style="font-size:11px; color:#888;"><?php echo date('M d, H:i', strtotime($order['ordered_at'])); ?></span></td>
-                        <td><?php echo htmlspecialchars($order['customer_name']); ?><br><span style="font-size:11px; color:#185FA5;">RM <?php echo number_format($order['total_amount'], 2); ?></span></td>
+                        <td><?php echo htmlspecialchars($order['customer_name']); ?><br><span style="font-size:11px; color:#185FA5; font-weight: bold;">RM <?php echo number_format($order['total_amount'], 2); ?></span></td>
                         <td><span class='badge badge-warn'><?php echo ucfirst($order['order_status']); ?></span></td>
                         <td>
                           <form method="POST" action="admin_orders.php" class="dispatch-form">
@@ -153,7 +160,7 @@ $available_drivers = $drivers_stmt->fetchAll();
                       </tr>
                   <?php endforeach; ?>
               <?php else: ?>
-                  <tr><td colspan='4' style='text-align:center; padding: 20px;'>No pending orders at the moment.</td></tr>
+                  <tr><td colspan='4' style='text-align:center; padding: 30px; color: #888;'>No pending orders at the moment.</td></tr>
               <?php endif; ?>
             </tbody>
           </table>
