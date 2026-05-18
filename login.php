@@ -2,46 +2,83 @@
 session_start();
 require 'db_connect.php';
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['login'])) {
-    $email = $_POST['email'];
-    $password = $_POST['password'];
+// --- AUTO-LOGIN VIA 'REMEMBER ME' COOKIE ---
+if (!isset($_SESSION['user_id']) && isset($_COOKIE['shopeasy_remember_me'])) {
+    $cookie_user_id = $_COOKIE['shopeasy_remember_me'];
+    $stmt = $pdo->prepare("SELECT u.user_id, u.full_name, r.role_name 
+                           FROM user u 
+                           JOIN user_role ur ON u.user_id = ur.user_id 
+                           JOIN role r ON ur.role_id = r.role_id 
+                           WHERE u.user_id = ? AND u.account_status = 'active'");
+    $stmt->execute([$cookie_user_id]);
+    $user = $stmt->fetch();
 
-    // 1. Query the database to look up the user by email, joining their role name
-    $stmt = $pdo->prepare("
-        SELECT u.user_id, u.full_name, u.email, u.password_hash, r.role_name 
-        FROM user u
-        JOIN user_role ur ON u.user_id = ur.user_id
-        JOIN role r ON ur.role_id = r.role_id
-        WHERE u.email = ? LIMIT 1
-    ");
+    if ($user) {
+        $_SESSION['user_id'] = $user['user_id'];
+        $_SESSION['role'] = $user['role_name'];
+        $_SESSION['full_name'] = $user['full_name'];
+        
+        if ($user['role_name'] === 'admin') header("Location: admin_dashboard.php");
+        elseif ($user['role_name'] === 'driver') header("Location: driver_view.php");
+        else header("Location: shop.php");
+        exit();
+    }
+}
+
+// --- STANDARD LOGIN PROCESSING ---
+$error = '';
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $email = trim($_POST['email']);
+    $password = $_POST['password'];
+    $remember_me = isset($_POST['remember_me']) ? true : false;
+
+    $stmt = $pdo->prepare("SELECT u.user_id, u.password_hash, u.full_name, r.role_name, u.account_status 
+                           FROM user u 
+                           JOIN user_role ur ON u.user_id = ur.user_id 
+                           JOIN role r ON ur.role_id = r.role_id 
+                           WHERE u.email = ?");
     $stmt->execute([$email]);
     $user = $stmt->fetch();
 
     if ($user) {
-        // 2. Check password: Supports both team placeholder seeds AND newly hashed accounts
-        $is_placeholder_seed = (strpos($user['password_hash'], '$2y$10$example') === 0 || strpos($user['password_hash'], '$2y$10$customer') === 0 || strpos($user['password_hash'], '$2y$10$driver') === 0);
-        
-        if ($is_placeholder_seed || password_verify($password, $user['password_hash'])) {
-            
-            // Password is valid! Save details into session variables
-            $_SESSION['user_id'] = $user['user_id'];
-            $_SESSION['full_name'] = $user['full_name'];
-            $_SESSION['role'] = $user['role_name'];
+        $valid_password = false;
+        $needs_rehash = false;
 
-            // 3. Dynamic Routing based on assigned database role
-            if ($user['role_name'] === 'admin') {
-                header("Location: admin_dashboard.php");
-            } elseif ($user['role_name'] === 'driver') {
-                header("Location: driver_view.php");
+        if (password_verify($password, $user['password_hash'])) {
+            $valid_password = true;
+        } elseif ($password === $user['password_hash']) {
+            $valid_password = true;
+            $needs_rehash = true; 
+        }
+
+        if ($valid_password) {
+            if ($user['account_status'] !== 'active') {
+                $error = "Your account is currently disabled. Please contact support.";
             } else {
-                header("Location: shop.php");
+                if ($needs_rehash) {
+                    $new_secure_hash = password_hash($password, PASSWORD_BCRYPT);
+                    $update_stmt = $pdo->prepare("UPDATE user SET password_hash = ? WHERE user_id = ?");
+                    $update_stmt->execute([$new_secure_hash, $user['user_id']]);
+                }
+
+                $_SESSION['user_id'] = $user['user_id'];
+                $_SESSION['role'] = $user['role_name'];
+                $_SESSION['full_name'] = $user['full_name'];
+
+                if ($remember_me) {
+                    setcookie('shopeasy_remember_me', $user['user_id'], time() + (86400 * 30), "/", "", false, true);
+                }
+
+                if ($user['role_name'] === 'admin') header("Location: admin_dashboard.php");
+                elseif ($user['role_name'] === 'driver') header("Location: driver_view.php");
+                else header("Location: shop.php");
+                exit();
             }
-            exit();
         } else {
-            $error_msg = "Invalid password entry.";
+            $error = "Invalid email or password.";
         }
     } else {
-        $error_msg = "No account found with that email address.";
+        $error = "Invalid email or password.";
     }
 }
 ?>
@@ -53,35 +90,59 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['login'])) {
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; background: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; }
-  .login-box { background: #fff; padding: 30px; border-radius: 12px; border: 1px solid #ddd; width: 100%; max-width: 400px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-  .brand { font-size: 22px; font-weight: bold; color: #1a1a2e; text-align: center; margin-bottom: 20px; }
-  .field { margin-bottom: 14px; }
-  .field label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; font-weight: bold; }
-  .field input { width: 100%; padding: 10px; font-size: 13px; border: 1px solid #ccc; border-radius: 6px; background: #fafafa; }
-  .btn { width: 100%; padding: 10px; background: #185FA5; color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; margin-top: 10px; }
-  .btn:hover { background: #144d85; }
-  .error { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; text-align: center; border: 1px solid #f5c6cb; }
-  .switch-link { display: block; text-align: center; font-size: 13px; color: #185FA5; text-decoration: none; margin-top: 15px; }
+  .login-card { background: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 360px; }
+  .login-card h2 { text-align: center; color: #1a1a2e; margin-bottom: 20px; font-size: 22px; }
+  .input-group { margin-bottom: 15px; }
+  .input-group label { display: block; font-size: 13px; color: #555; margin-bottom: 5px; font-weight: bold; }
+  .input-group input[type="email"], .input-group input[type="password"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  
+  .options-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 20px; }
+  .remember-me { display: flex; align-items: center; gap: 5px; color: #555; cursor: pointer; }
+  .forgot-link { color: #185FA5; text-decoration: none; font-weight: bold; }
+  .forgot-link:hover { text-decoration: underline; }
+  
+  /* Reverted to original UI styling */
+  .btn { width: 100%; padding: 10px; background: #185FA5; color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; }
+  .btn:hover { background: #12487e; }
+  
+  .error { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 6px; font-size: 13px; margin-bottom: 15px; text-align: center; border: 1px solid #f5c6cb; }
+  .footer-text { text-align: center; font-size: 12px; margin-top: 15px; color: #666; }
 </style>
 </head>
 <body>
-<div class="login-box">
-  <div class="brand">ShopEasy Portal</div>
+
+<div class="login-card">
+  <h2>Welcome to ShopEasy</h2>
   
-  <?php if(isset($error_msg)) echo "<div class='error'>$error_msg</div>"; ?>
+  <?php if($error): ?>
+    <div class="error"><?php echo $error; ?></div>
+  <?php endif; ?>
 
   <form method="POST" action="login.php">
-    <div class="field">
+    <div class="input-group">
       <label>Email Address</label>
-      <input type="email" name="email" placeholder="customer@shopeasy.com" required>
+      <input type="email" name="email" required placeholder="name@example.com">
     </div>
-    <div class="field">
+    
+    <div class="input-group">
       <label>Password</label>
-      <input type="password" name="password" placeholder="••••••••" required>
+      <input type="password" name="password" required placeholder="••••••••">
     </div>
-    <button type="submit" name="login" class="btn">Login</button>
-    <a href="register.php" class="switch-link">New customer? Create an account</a>
+
+    <div class="options-row">
+      <label class="remember-me">
+        <input type="checkbox" name="remember_me"> Remember me
+      </label>
+      <a href="forgot_password.php" class="forgot-link">Forgot Password?</a>
+    </div>
+
+    <button type="submit" class="btn">Login</button>
   </form>
+  
+  <div class="footer-text">
+    Don't have an account? <a href="register.php" class="forgot-link">Register here</a>
+  </div>
 </div>
+
 </body>
 </html>
