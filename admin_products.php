@@ -82,13 +82,13 @@ $products = $pdo->query("SELECT product_id, product_name, price, is_active, crea
   <div class="content">
     <div class="sidebar-layout">
       <div class="side-menu">
-        <a href="admin_dashboard.php" style="text-decoration: none;"><div class="side-item">Dashboard</div></a>
-        <a href="admin_orders.php" style="text-decoration: none;"><div class="side-item">Orders</div></a>
-        <a href="admin_products.php" style="text-decoration: none;"><div class="side-item active">Products</div></a>
-        <a href="admin_stock.php" style="text-decoration: none;"><div class="side-item">Stock</div></a>
-        <a href="admin_drivers.php" style="text-decoration: none;"><div class="side-item">Drivers</div></a>
-        <a href="admin_customers.php" style="text-decoration: none;"><div class="side-item">Customers</div></a>
-      </div>
+  <a href="admin_dashboard.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_dashboard.php') ? 'active' : ''; ?>">Dashboard</div></a>
+  <a href="admin_orders.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_orders.php') ? 'active' : ''; ?>">Orders</div></a>
+  <a href="admin_products.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_products.php') ? 'active' : ''; ?>">Products</div></a>
+  <a href="admin_stock.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_stock.php') ? 'active' : ''; ?>">Stock</div></a>
+  <a href="admin_drivers.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_drivers.php') ? 'active' : ''; ?>">Drivers</div></a>
+  <a href="admin_customers.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_customers.php') ? 'active' : ''; ?>">Customers</div></a>
+</div>
       <div>
         <div class="card" style="background: #f8f9fa;">
           <div class="card-title">Add New Product</div>
