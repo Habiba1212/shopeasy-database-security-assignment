@@ -102,14 +102,13 @@ $drivers = $pdo->query("
   <div class="content">
     <div class="sidebar-layout">
       <div class="side-menu">
-        <a href="admin_dashboard.php" style="text-decoration: none;"><div class="side-item active">Dashboard</div></a>
-        <a href="admin_orders.php" style="text-decoration: none;"><div class="side-item">Orders</div></a>
-        <a href="admin_products.php" style="text-decoration: none;"><div class="side-item">Products</div></a>
-        <a href="admin_stock.php" style="text-decoration: none;"><div class="side-item">Stock</div></a>
-        <a href="admin_drivers.php" style="text-decoration: none;"><div class="side-item">Drivers</div></a>
-        <a href="admin_customers.php" style="text-decoration: none;"><div class="side-item">Customers</div></a>
-      </div>
-      
+  <a href="admin_dashboard.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_dashboard.php') ? 'active' : ''; ?>">Dashboard</div></a>
+  <a href="admin_orders.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_orders.php') ? 'active' : ''; ?>">Orders</div></a>
+  <a href="admin_products.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_products.php') ? 'active' : ''; ?>">Products</div></a>
+  <a href="admin_stock.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_stock.php') ? 'active' : ''; ?>">Stock</div></a>
+  <a href="admin_drivers.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_drivers.php') ? 'active' : ''; ?>">Drivers</div></a>
+  <a href="admin_customers.php" style="text-decoration: none;"><div class="side-item <?php echo (basename($_SERVER['PHP_SELF']) == 'admin_customers.php') ? 'active' : ''; ?>">Customers</div></a>
+</div>
       <div>
         <div class="metrics-row">
           <div class="metric"><div class="metric-label">Orders Today</div><div class="metric-value"><?php echo $orders_today; ?></div></div>
