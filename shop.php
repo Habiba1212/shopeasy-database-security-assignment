@@ -13,7 +13,7 @@ if (!isset($_SESSION['cart'])) {
     $_SESSION['cart'] = [];
 }
 
-// Handle Add to Cart action
+// Add to Cart action
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_to_cart'])) {
     $product_id = $_POST['product_id'];
     $product_name = $_POST['product_name'];
@@ -32,46 +32,58 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_to_cart'])) {
     exit();
 }
 
-// Handle Remove from Cart action
+// Remove from Cart action
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['remove_from_cart'])) {
     $product_id = $_POST['product_id'];
     
-    // Check if the product exists in the session cart, then remove it
     if (isset($_SESSION['cart'][$product_id])) {
         unset($_SESSION['cart'][$product_id]);
     }
     
-    // Refresh the page to update the cart summary
     header("Location: shop.php");
     exit();
 }
 
-// Handle Order & Payment Placement (Saves to both tables!)
+// Order & Payment Placement (Saves to orders, location, and payment tables!)
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) && !empty($_SESSION['cart'])) {
     $user_id = $_SESSION['user_id'];
     $payment_method = $_POST['payment_method'];
-    $total_amount = 0;
     
+    // Capture Delivery Details from the form
+    $address = trim($_POST['address']);
+    $city = trim($_POST['city']);
+    $postcode = trim($_POST['postcode']);
+    
+    $total_amount = 0;
     foreach ($_SESSION['cart'] as $item) {
         $total_amount += ($item['price'] * $item['quantity']);
     }
-    
-    // Grab the user's default location
-    $loc_stmt = $pdo->prepare("SELECT location_id FROM location WHERE user_id = ? LIMIT 1");
-    $loc_stmt->execute([$user_id]);
-    $loc = $loc_stmt->fetch();
-    $location_id = $loc ? $loc['location_id'] : 1; 
 
     try {
         // Start transaction to keep data perfectly synchronized
         $pdo->beginTransaction();
 
-        // 1. Create the main order record
+        // 1. Handle Delivery Location (Update if exists, Insert if new)
+        $loc_stmt = $pdo->prepare("SELECT location_id FROM location WHERE user_id = ? LIMIT 1");
+        $loc_stmt->execute([$user_id]);
+        $loc = $loc_stmt->fetch();
+
+        if ($loc) {
+            $location_id = $loc['location_id'];
+            $upd_loc = $pdo->prepare("UPDATE location SET address_line = ?, city = ?, postcode = ? WHERE location_id = ?");
+            $upd_loc->execute([$address, $city, $postcode, $location_id]);
+        } else {
+            $ins_loc = $pdo->prepare("INSERT INTO location (user_id, address_line, city, postcode) VALUES (?, ?, ?, ?)");
+            $ins_loc->execute([$user_id, $address, $city, $postcode]);
+            $location_id = $pdo->lastInsertId(); 
+        }
+
+        // 2. Create the main order record, now linked to the verified location
         $stmt = $pdo->prepare("INSERT INTO orders (customer_id, location_id, total_amount, order_status) VALUES (?, ?, ?, 'pending')");
         $stmt->execute([$user_id, $location_id, $total_amount]);
         $order_id = $pdo->lastInsertId(); 
 
-        // 2. Insert items and deduct stock quantities
+        // 3. Insert items and deduct stock quantities
         foreach ($_SESSION['cart'] as $product_id => $item) {
             $stmt = $pdo->prepare("INSERT INTO order_item (order_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)");
             $stmt->execute([$order_id, $product_id, $item['quantity'], $item['price']]);
@@ -80,9 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) &&
             $stock_stmt->execute([$item['quantity'], $product_id]);
         }
 
-        // 3. Populate Habiba's Payment table (Matched to Schema Columns)
+        // 4. Populate Payment table
         $transaction_ref = "TXN-" . date("Y") . "-" . str_pad(rand(1, 9999), 4, "0", STR_PAD_LEFT);
-        
         $pay_stmt = $pdo->prepare("INSERT INTO payment (order_id, payment_method, payment_status, transaction_reference, paid_at) VALUES (?, ?, 'paid', ?, CURRENT_TIMESTAMP)");
         $pay_stmt->execute([$order_id, $payment_method, $transaction_ref]);
 
@@ -96,6 +107,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) &&
         $pdo->rollBack();
         $order_error = "Payment processing transaction aborted: " . $e->getMessage();
     }
+}
+
+// Fetch current user location to pre-fill the delivery form if it exists
+$current_loc = null;
+if (isset($_SESSION['user_id'])) {
+    $loc_stmt = $pdo->prepare("SELECT * FROM location WHERE user_id = ? LIMIT 1");
+    $loc_stmt->execute([$_SESSION['user_id']]);
+    $current_loc = $loc_stmt->fetch();
 }
 ?>
 <!DOCTYPE html>
@@ -234,30 +253,46 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) &&
           <div class="cart-total"><span>Total</span><span>RM <?php echo number_format($total_price, 2); ?></span></div>
           
           <?php if (!empty($_SESSION['cart'])): ?>
-              <a href="shop.php?stage=payment" class="order-btn">Proceed to Payment</a>
+              <a href="shop.php?stage=payment" class="order-btn">Proceed to Checkout</a>
           <?php else: ?>
-              <button class="order-btn" disabled style="background:#ccc; cursor:not-allowed;">Place Order</button>
+              <button class="order-btn" disabled style="background:#ccc; cursor:not-allowed;">Proceed to Checkout</button>
           <?php endif; ?>
 
       <?php else: ?>
-          <div class="cart-title">💳 Secure Payment</div>
-          <?php
-          $total_price = 0;
-          foreach ($_SESSION['cart'] as $product_id => $item) {
-              $item_total = $item['price'] * $item['quantity'];
-              $total_price += $item_total;
-              // Clean read-only simple display for final payment stage
-              echo '<div class="cart-item" style="color: #555;">
-                      <span>' . htmlspecialchars($item['name']) . ' (×' . $item['quantity'] . ')</span>
-                      <span>RM ' . number_format($item_total, 2) . '</span>
-                    </div>';
-          }
-          ?>
-          <div class="cart-total" style="border-bottom: 1px dashed #ddd; margin-bottom: 10px;">
-              <span>Amount Due:</span><span>RM <?php echo number_format($total_price, 2); ?></span>
-          </div>
-
+          <div class="cart-title">🛒 Checkout</div>
+          
           <form method="POST" action="shop.php">
+              
+              <div style="margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #eee;">
+                  <div style="font-size: 13px; font-weight: bold; color: #1a1a2e; margin-bottom: 10px;">📍 Step 1: Delivery Address</div>
+                  
+                  <label class="pay-label">Street Address</label>
+                  <input type="text" name="address" class="pay-input" value="<?php echo htmlspecialchars($current_loc['address_line'] ?? ''); ?>" required>
+                  
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                      <div>
+                          <label class="pay-label">City</label>
+                          <input type="text" name="city" class="pay-input" value="<?php echo htmlspecialchars($current_loc['city'] ?? ''); ?>" required>
+                      </div>
+                      <div>
+                          <label class="pay-label">Postcode</label>
+                          <input type="text" name="postcode" class="pay-input" value="<?php echo htmlspecialchars($current_loc['postcode'] ?? ''); ?>" required maxlength="5" oninput="this.value = this.value.replace(/[^0-9]/g, '');">
+                      </div>
+                  </div>
+              </div>
+
+              <div style="font-size: 13px; font-weight: bold; color: #1a1a2e; margin-bottom: 10px;">💳 Step 2: Payment Details</div>
+              <?php
+              $total_price = 0;
+              foreach ($_SESSION['cart'] as $product_id => $item) {
+                  $item_total = $item['price'] * $item['quantity'];
+                  $total_price += $item_total;
+              }
+              ?>
+              <div class="cart-total" style="border-bottom: 1px dashed #ddd; margin-bottom: 10px;">
+                  <span>Amount Due:</span><span>RM <?php echo number_format($total_price, 2); ?></span>
+              </div>
+
               <label class="pay-label">Payment Method</label>
               <select name="payment_method" class="pay-input">
                   <option value="Credit Card">Credit Card</option>
