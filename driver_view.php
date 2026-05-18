@@ -9,146 +9,173 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'driver') {
 }
 
 $driver_id = $_SESSION['user_id'];
-$driver_name = $pdo->query("SELECT full_name FROM user WHERE user_id = {$driver_id}")->fetchColumn();
 
-// --- HANDLE STATUS UPDATES ---
-if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_status'])) {
-    $new_status = $_POST['delivery_status'];
+// Fetch Driver Name from database
+$stmt_name = $pdo->prepare("SELECT full_name FROM user WHERE user_id = ?");
+$stmt_name->execute([$driver_id]);
+$driver_name = $stmt_name->fetchColumn();
+
+// --- HANDLE DELIVERY STATE CHANGES ---
+
+// 1. Driver starts the route
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['start_delivery'])) {
     $delivery_id = $_POST['delivery_id'];
-    $order_id = $_POST['order_id'];
-
-    // 1. Update the delivery table
-    $stmt = $pdo->prepare("UPDATE delivery SET delivery_status = ? WHERE delivery_id = ?");
-    $stmt->execute([$new_status, $delivery_id]);
-
-    // 2. Sync it with the main orders table so the Customer and Admin see the update!
-    $order_status = ($new_status == 'delivered') ? 'delivered' : 'shipped';
-    $stmt2 = $pdo->prepare("UPDATE orders SET order_status = ? WHERE order_id = ?");
-    $stmt2->execute([$order_status, $order_id]);
-
-    // Refresh to show updates
+    
+    $stmt = $pdo->prepare("UPDATE delivery SET delivery_status = 'out_for_delivery' WHERE delivery_id = ?");
+    $stmt->execute([$delivery_id]);
+    
     header("Location: driver_view.php");
     exit();
 }
 
-// Fetch all active deliveries assigned specifically to this driver
-$deliveries = $pdo->prepare("
-    SELECT d.delivery_id, d.order_id, d.delivery_status, o.total_amount, 
+// 2. Driver finishes the delivery
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['confirm_delivery'])) {
+    $delivery_id = $_POST['delivery_id'];
+    $order_id = $_POST['order_id'];
+
+    try {
+        $pdo->beginTransaction();
+
+        $stmt1 = $pdo->prepare("UPDATE delivery SET delivery_status = 'delivered', delivered_at = CURRENT_TIMESTAMP WHERE delivery_id = ?");
+        $stmt1->execute([$delivery_id]);
+
+        $stmt2 = $pdo->prepare("UPDATE orders SET order_status = 'delivered' WHERE order_id = ?");
+        $stmt2->execute([$order_id]);
+
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+    }
+
+    header("Location: driver_view.php");
+    exit();
+}
+
+// Fetch active assignments for this specific driver
+$deliveries_stmt = $pdo->prepare("
+    SELECT d.delivery_id, d.order_id, d.delivery_status,
            l.address_line, l.city, l.postcode, 
-           u.full_name as customer_name, u.phone
+           u.full_name as customer_name, u.phone,
+           GROUP_CONCAT(CONCAT(p.product_name, ' × ', oi.quantity) SEPARATOR ', ') as item_details
     FROM delivery d
     JOIN orders o ON d.order_id = o.order_id
     JOIN location l ON d.location_id = l.location_id
     JOIN user u ON o.customer_id = u.user_id
+    JOIN order_item oi ON o.order_id = oi.order_id
+    JOIN product p ON oi.product_id = p.product_id
     WHERE d.driver_id = ? AND d.delivery_status != 'delivered'
+    GROUP BY d.delivery_id
     ORDER BY d.assigned_at DESC
 ");
-$deliveries->execute([$driver_id]);
-$active_tasks = $deliveries->fetchAll();
+$deliveries_stmt->execute([$driver_id]);
+$assigned_deliveries = $deliveries_stmt->fetchAll();
+$delivery_count = count($assigned_deliveries);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>ShopEasy - Driver Portal</title>
+<title>ShopEasy - Driver Delivery View</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; background: #f0f2f5; }
-  nav { background: #1a1a2e; padding: 16px 30px; display: flex; justify-content: space-between; align-items: center; }
-  nav .brand { color: #fff; font-size: 18px; font-weight: bold; }
-  nav .user-info { color: #ccc; font-size: 14px; }
-  nav .user-info strong { color: #fff; }
-  nav a { color: #f87171; text-decoration: none; font-size: 14px; margin-left: 20px; font-weight: bold; }
+  body { font-family: Arial, sans-serif; background: #f5f5f5; padding: 30px; }
+  h1 { text-align: center; font-size: 20px; color: #1a1a2e; margin-bottom: 8px; }
+  .subtitle { text-align: center; font-size: 13px; color: #666; margin-bottom: 30px; }
+  .screen { background: #fff; border: 1px solid #ddd; border-radius: 12px; overflow: hidden; }
+  .navbar { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: #1a1a2e; color: #fff; }
+  .nav-brand { font-size: 16px; font-weight: bold; color: #fff; }
+  .logout-btn { color: #f87171; text-decoration: none; font-weight: bold; font-size: 13px; }
+  .content { padding: 20px; }
   
-  .container { max-width: 800px; margin: 30px auto; padding: 0 20px; }
-  .header-section { margin-bottom: 24px; }
-  .header-section h1 { font-size: 22px; color: #1a1a2e; margin-bottom: 6px; }
-  .header-section p { font-size: 14px; color: #666; }
+  .delivery-card { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-bottom: 12px; text-align: left; }
+  .delivery-card.active-driving { border: 2px solid #185FA5; box-shadow: 0 4px 8px rgba(24,95,165,0.15); }
+  .delivery-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .delivery-addr { font-size: 13px; color: #555; margin-bottom: 10px; }
+  .map-box { height: 75px; background: #e8f5e9; border: 1px dashed #81c784; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #388e3c; margin-bottom: 10px; }
   
-  .task-card { background: #fff; border: 1px solid #ddd; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-  .task-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid #eee; padding-bottom: 12px; }
-  .order-id { font-size: 18px; font-weight: bold; color: #185FA5; }
+  .action-row { display: flex; gap: 8px; width: 100%; }
+  .btn-start { flex: 1; padding: 10px; font-size: 13px; font-weight: bold; border-radius: 6px; background: #185FA5; color: #fff; border: none; cursor: pointer; }
+  .btn-confirm { flex: 1; padding: 10px; font-size: 13px; font-weight: bold; border-radius: 6px; background: #22c55e; color: #fff; border: none; cursor: pointer; }
   
-  .badge { display: inline-block; font-size: 12px; padding: 4px 10px; border-radius: 20px; font-weight: bold; }
-  .status-assigned { background: #d1ecf1; color: #0c5460; }
-  .status-out { background: #fff3cd; color: #856404; }
-  
-  .task-details { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; font-size: 14px; color: #333; }
-  .detail-group strong { display: block; font-size: 12px; color: #888; margin-bottom: 4px; text-transform: uppercase; }
-  
-  .action-bar { background: #f8f9fa; padding: 16px; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; }
-  .action-bar select { padding: 8px 12px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
-  .btn { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold; color: #fff; background: #185FA5; }
-  .btn:hover { background: #0f4a8a; }
-  
-  .empty-state { text-align: center; padding: 50px 20px; background: #fff; border-radius: 12px; border: 1px solid #ddd; color: #888; }
+  .badge { display: inline-block; font-size: 11px; padding: 3px 9px; border-radius: 20px; font-weight: bold; }
+  .badge-warn { background: #fff3cd; color: #856404; }
+  .badge-info { background: #d1ecf1; color: #0c5460; }
+  .note { font-size: 11px; color: #888; text-align: center; margin-top: 30px; }
 </style>
 </head>
 <body>
 
-<nav>
-  <span class="brand">ShopEasy Driver</span>
-  <div>
-    <span class="user-info">Driver: <strong><?php echo htmlspecialchars($driver_name); ?></strong></span>
-    <a href="login.php">Logout</a>
-  </div>
-</nav>
+<h1>ShopEasy — Single Owner Online Store</h1>
+<p class="subtitle">Live Database View for CCS6344 Assignment 1 | Database &amp; Cloud Security</p>
 
-<div class="container">
-  <div class="header-section">
-    <h1>My Deliveries</h1>
-    <p>Manage your assigned routes and update statuses in real-time.</p>
-  </div>
-
-  <?php if (count($active_tasks) > 0): ?>
-      <?php foreach ($active_tasks as $task): ?>
-          <?php 
-            $badge_class = $task['delivery_status'] == 'assigned' ? 'status-assigned' : 'status-out';
-            $display_status = str_replace('_', ' ', ucfirst($task['delivery_status']));
-          ?>
-          <div class="task-card">
-            <div class="task-header">
-              <span class="order-id">Order #<?php echo $task['order_id']; ?></span>
-              <span class="badge <?php echo $badge_class; ?>"><?php echo $display_status; ?></span>
-            </div>
-            
-            <div class="task-details">
-              <div class="detail-group">
-                <strong>Customer Info</strong>
-                <?php echo htmlspecialchars($task['customer_name']); ?><br>
-                📞 <?php echo htmlspecialchars($task['phone'] ?? 'No phone provided'); ?>
-              </div>
-              <div class="detail-group">
-                <strong>Delivery Address</strong>
-                <?php echo htmlspecialchars($task['address_line']); ?><br>
-                <?php echo htmlspecialchars($task['city']) . ', ' . htmlspecialchars($task['postcode']); ?>
-              </div>
-            </div>
-
-            <div class="action-bar">
-              <form method="POST" action="driver_view.php" style="display: flex; gap: 10px; width: 100%;">
-                <input type="hidden" name="delivery_id" value="<?php echo $task['delivery_id']; ?>">
-                <input type="hidden" name="order_id" value="<?php echo $task['order_id']; ?>">
-                
-                <select name="delivery_status" style="flex: 1;">
-                  <option value="assigned" <?php if($task['delivery_status'] == 'assigned') echo 'selected'; ?>>Assigned (At Warehouse)</option>
-                  <option value="out_for_delivery" <?php if($task['delivery_status'] == 'out_for_delivery') echo 'selected'; ?>>Out for Delivery</option>
-                  <option value="delivered">✅ Mark as Delivered</option>
-                </select>
-                
-                <button type="submit" name="update_status" class="btn">Update Status</button>
-              </form>
-            </div>
-          </div>
-      <?php endforeach; ?>
-  <?php else: ?>
-      <div class="empty-state">
-        <h2>🎉 You're all caught up!</h2>
-        <p style="margin-top: 10px;">You have no active delivery assignments right now.</p>
+<div style="max-width: 420px; margin: 0 auto;">
+  <div class="screen">
+    <div class="navbar">
+      <span class="nav-brand">My Deliveries</span>
+      <a href="login.php" class="logout-btn">Logout</a>
+    </div>
+    
+    <div class="content">
+      <div style="font-size:13px; color:#555; margin-bottom:14px; text-align: left;">
+        Hi <?php echo htmlspecialchars($driver_name); ?> — <strong><?php echo $delivery_count; ?> deliveries</strong> left today
       </div>
-  <?php endif; ?>
 
+      <?php if ($delivery_count > 0): ?>
+          <?php foreach ($assigned_deliveries as $index => $task): ?>
+              <?php 
+                $is_out_for_delivery = ($task['delivery_status'] === 'out_for_delivery');
+                $badge_class = $is_out_for_delivery ? "badge-warn" : "badge-info";
+                $status_label = $is_out_for_delivery ? "Driving to Location" : "Pending Pickup";
+                
+                // Highlight the card deeply if they are currently driving
+                $card_style_class = $is_out_for_delivery ? "delivery-card active-driving" : "delivery-card";
+                $fade_style = ($index !== 0 && !$is_out_for_delivery) ? "style='opacity:0.65;'" : "";
+              ?>
+              
+              <div class="<?php echo $card_style_class; ?>" <?php echo $fade_style; ?>>
+                <div class="delivery-header">
+                  <span style="font-size:14px; font-weight:bold; color:#1a1a2e;">Order #<?php echo $task['order_id']; ?></span>
+                  <span class="badge <?php echo $badge_class; ?>"><?php echo $status_label; ?></span>
+                </div>
+                
+                <div class="delivery-addr">📍 <?php echo htmlspecialchars($task['address_line'] . ', ' . $task['city'] . ', ' . $task['postcode']); ?></div>
+                
+                <?php if ($index === 0 || $is_out_for_delivery): ?>
+                    <div class="map-box">🗺 Map — GPS route to destination</div>
+                    <div style="font-size:12px; color:#555; margin-bottom:10px;">
+                      <strong>Items:</strong> <?php echo htmlspecialchars($task['item_details']); ?> <br>
+                      <strong>Customer:</strong> <?php echo htmlspecialchars($task['customer_name']); ?> (<?php echo htmlspecialchars($task['phone'] ?? 'N/A'); ?>)
+                    </div>
+                    
+                    <form method="POST" action="driver_view.php" style="width: 100%;">
+                      <input type="hidden" name="delivery_id" value="<?php echo $task['delivery_id']; ?>">
+                      <input type="hidden" name="order_id" value="<?php echo $task['order_id']; ?>">
+                      
+                      <div class="action-row">
+                        <?php if ($task['delivery_status'] === 'assigned'): ?>
+                            <button type="submit" name="start_delivery" class="btn-start">🚀 Start Route</button>
+                        <?php else: ?>
+                            <button type="submit" name="confirm_delivery" class="btn-confirm">✔ Mark as Delivered</button>
+                        <?php endif; ?>
+                      </div>
+                    </form>
+                <?php else: ?>
+                    <div style="font-size:12px; color:#555;">
+                      <strong>Items:</strong> <?php echo htmlspecialchars($task['item_details']); ?>
+                    </div>
+                <?php endif; ?>
+              </div>
+          <?php endforeach; ?>
+      <?php else: ?>
+          <div class="delivery-card" style="text-align: center; padding: 30px 10px; color: #888;">
+            🎉 You have completed all your deliveries!
+          </div>
+      <?php endif; ?>
+
+    </div>
+  </div>
 </div>
 
+<p class="note">CCS6344 T2610 — Database &amp; Cloud Security | Assignment 1</p>
 </body>
 </html>
