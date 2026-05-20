@@ -28,21 +28,66 @@ $owner_name = $pdo->query("SELECT full_name FROM user WHERE user_id = {$_SESSION
 
 // --- HANDLE FORM SUBMISSIONS (Task 2 Requirement) ---
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    if (isset($_POST['add_product'])) {
-        // 1. Insert into Product table
-        $stmt = $pdo->prepare("INSERT INTO product (product_name, price, is_active) VALUES (?, ?, 1)");
-        $stmt->execute([$_POST['new_name'], $_POST['new_price']]);
-        $new_product_id = $pdo->lastInsertId();
-        
-        // 2. Create a blank inventory record for it
-        $stmt2 = $pdo->prepare("INSERT INTO inventory (product_id, quantity_available) VALUES (?, 0)");
-        $stmt2->execute([$new_product_id]);
-        
-    } elseif (isset($_POST['delete_product'])) {
-        // Habiba's DB uses CASCADE, so deleting the product also deletes its inventory!
-        $stmt = $pdo->prepare("DELETE FROM product WHERE product_id = ?");
-        $stmt->execute([$_POST['delete_id']]);
-    }
+   if (isset($_POST['add_product'])) {
+
+    // 1. Insert into Product table
+    $stmt = $pdo->prepare("
+        INSERT INTO product 
+        (product_name, price, is_active) 
+        VALUES (?, ?, 1)
+    ");
+
+    $stmt->execute([
+        $_POST['new_name'],
+        $_POST['new_price']
+    ]);
+
+    $new_product_id = $pdo->lastInsertId();
+
+    // 2. Create inventory record
+    $stmt2 = $pdo->prepare("
+        INSERT INTO inventory 
+        (product_id, quantity_available) 
+        VALUES (?, 0)
+    ");
+
+    $stmt2->execute([$new_product_id]);
+
+    // 3. AUDIT LOGGING
+    $log_stmt = $pdo->prepare("
+        INSERT INTO audit_log (user_id, action)
+        VALUES (?, ?)
+    ");
+
+    $log_stmt->execute([
+        $_SESSION['user_id'],
+        'Admin Added Product'
+    ]);
+
+
+} elseif (isset($_POST['delete_product'])) {
+
+    // Delete product
+    $stmt = $pdo->prepare("
+        DELETE FROM product 
+        WHERE product_id = ?
+    ");
+
+    $stmt->execute([
+        $_POST['delete_id']
+    ]);
+
+    // AUDIT LOGGING
+    $log_stmt = $pdo->prepare("
+        INSERT INTO audit_log (user_id, action)
+        VALUES (?, ?)
+    ");
+
+    $log_stmt->execute([
+        $_SESSION['user_id'],
+        'Admin Deleted Product'
+    ]);
+}
     // Refresh to prevent duplicate form submissions
     header("Location: admin_products.php");
     exit();
