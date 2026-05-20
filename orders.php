@@ -41,7 +41,7 @@ $user_id = $_SESSION['user_id'];
   <div class="links">
     <a href="shop.php">Products</a>
     <a href="orders.php" style="color:#fff; font-weight:bold;">My Orders</a>
-    <a href="login.php">Logout</a>
+    <a href="logout.php">Logout</a>
   </div>
 </nav>
 
