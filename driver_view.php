@@ -35,12 +35,31 @@ $driver_name = $stmt_name->fetchColumn();
 
 // 1. Driver starts the route
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['start_delivery'])) {
+
     $delivery_id = $_POST['delivery_id'];
-    
-    $stmt = $pdo->prepare("UPDATE delivery SET delivery_status = 'out_for_delivery' WHERE delivery_id = ?");
+
+    // UPDATE DELIVERY STATUS
+    $stmt = $pdo->prepare("
+        UPDATE delivery
+        SET delivery_status = 'out_for_delivery'
+        WHERE delivery_id = ?
+    ");
+
     $stmt->execute([$delivery_id]);
-    
+
+    // AUDIT LOGGING
+    $log_stmt = $pdo->prepare("
+        INSERT INTO audit_log (user_id, action)
+        VALUES (?, ?)
+    ");
+
+    $log_stmt->execute([
+        $_SESSION['user_id'],
+        'Driver Updated Delivery Status'
+    ]);
+
     header("Location: driver_view.php");
+
     exit();
 }
 
