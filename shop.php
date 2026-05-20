@@ -172,7 +172,7 @@ if (isset($_SESSION['user_id'])) {
     <a href="shop.php">Products</a>
     <a href="orders.php">My Orders</a>
     <a href="#" class="cart-btn">Cart (<?php echo array_sum(array_column($_SESSION['cart'], 'quantity')); ?>)</a>
-    <a href="login.php">Logout</a>
+    <a href="logout.php">Logout</a>
   </div>
 </nav>
 
