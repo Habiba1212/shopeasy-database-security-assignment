@@ -1,4 +1,16 @@
 <?php
+
+session_start();
+
+if (!isset($_SESSION['user_id'])) {
+
+    header("Location: login.php");
+
+    exit();
+}
+
+?>
+<?php
 session_start();
 require 'db_connect.php';
 
