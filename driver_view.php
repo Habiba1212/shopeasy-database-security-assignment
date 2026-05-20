@@ -184,7 +184,7 @@ $delivery_count = count($assigned_deliveries);
           <?php endforeach; ?>
       <?php else: ?>
           <div class="delivery-card" style="text-align: center; padding: 30px 10px; color: #888;">
-            🎉 You have completed all your deliveries!
+            You have completed all your deliveries!
           </div>
       <?php endif; ?>
 
