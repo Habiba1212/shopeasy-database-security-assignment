@@ -112,7 +112,7 @@ $delivery_count = count($assigned_deliveries);
   <div class="screen">
     <div class="navbar">
       <span class="nav-brand">My Deliveries</span>
-      <a href="login.php" class="logout-btn">Logout</a>
+      <a href="logout.php" class="logout-btn">Logout</a>
     </div>
     
     <div class="content">
