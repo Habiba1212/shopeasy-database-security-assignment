@@ -105,7 +105,7 @@ $available_drivers = $drivers_stmt->fetchAll();
     <span class="nav-brand">ShopEasy Admin Panel</span>
     <div class="nav-links">
       <span>Logged in as: <strong><?php echo htmlspecialchars($owner_name); ?></strong></span>
-      <a href="login.php">Logout</a>
+<a href="logout.php">Logout</a>
     </div>
   </div>
   <div class="content">
