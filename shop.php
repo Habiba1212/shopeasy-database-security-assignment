@@ -107,7 +107,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) &&
         // 4. Populate Payment table
         $transaction_ref = "TXN-" . date("Y") . "-" . str_pad(rand(1, 9999), 4, "0", STR_PAD_LEFT);
         $pay_stmt = $pdo->prepare("INSERT INTO payment (order_id, payment_method, payment_status, transaction_reference, paid_at) VALUES (?, ?, 'paid', ?, CURRENT_TIMESTAMP)");
-        $pay_stmt->execute([$order_id, $payment_method, $transaction_ref]);
+       $pay_stmt->execute([
+    $order_id,
+    $payment_method,
+    $transaction_ref
+]);
+
+// AUDIT LOGGING
+$log_stmt = $pdo->prepare("
+    INSERT INTO audit_log (user_id, action)
+    VALUES (?, ?)
+");
+
+$log_stmt->execute([
+    $user_id,
+    'Customer Placed Order'
+]);
 
         $pdo->commit();
 
