@@ -1,5 +1,5 @@
-<?php
 
+<?php
 
 session_start();
 
@@ -14,7 +14,6 @@ if (
 }
 
 ?>
-
 <?php
 session_start();
 require 'db_connect.php';
