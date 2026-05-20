@@ -13,7 +13,7 @@ if (
 }
 
 ?>
-    <?php
+<?php
 
 session_start();
 require 'db_connect.php';
