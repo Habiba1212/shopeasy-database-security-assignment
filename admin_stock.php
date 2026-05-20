@@ -28,9 +28,32 @@ $owner_name = $pdo->query("SELECT full_name FROM user WHERE user_id = {$_SESSION
 
 // --- HANDLE STOCK UPDATES ---
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_stock'])) {
-    $stmt = $pdo->prepare("UPDATE inventory SET quantity_available = ? WHERE product_id = ?");
-    $stmt->execute([$_POST['new_qty'], $_POST['product_id']]);
+
+    // UPDATE STOCK
+    $stmt = $pdo->prepare("
+        UPDATE inventory
+        SET quantity_available = ?
+        WHERE product_id = ?
+    ");
+
+    $stmt->execute([
+        $_POST['new_qty'],
+        $_POST['product_id']
+    ]);
+
+    // AUDIT LOGGING
+    $log_stmt = $pdo->prepare("
+        INSERT INTO audit_log (user_id, action)
+        VALUES (?, ?)
+    ");
+
+    $log_stmt->execute([
+        $_SESSION['user_id'],
+        'Admin Updated Stock'
+    ]);
+
     header("Location: admin_stock.php");
+
     exit();
 }
 
