@@ -2,53 +2,6 @@
 session_start();
 require 'db_connect.php';
 
-// ---------------- AUTO LOGIN USING COOKIE ----------------
-
-if (!isset($_SESSION['user_id']) && isset($_COOKIE['shopeasy_remember_me'])) {
-
-    $cookie_user_id = $_COOKIE['shopeasy_remember_me'];
-
-    $stmt = $pdo->prepare("
-        SELECT 
-            u.user_id,
-            u.full_name,
-            r.role_name
-        FROM user u
-        JOIN user_role ur ON u.user_id = ur.user_id
-        JOIN role r ON ur.role_id = r.role_id
-        WHERE u.user_id = ?
-        AND u.account_status = 'active'
-    ");
-
-    $stmt->execute([$cookie_user_id]);
-
-    $user = $stmt->fetch();
-
-    if ($user) {
-
-        session_regenerate_id(true);
-
-        $_SESSION['user_id'] = $user['user_id'];
-        $_SESSION['role'] = $user['role_name'];
-        $_SESSION['full_name'] = $user['full_name'];
-
-        if ($user['role_name'] === 'admin') {
-
-            header("Location: admin_dashboard.php");
-
-        } elseif ($user['role_name'] === 'driver') {
-
-            header("Location: driver_view.php");
-
-        } else {
-
-            header("Location: shop.php");
-        }
-
-        exit();
-    }
-}
-
 // ---------------- LOGIN PROCESS ----------------
 
 $error = '';
@@ -57,7 +10,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     $email = trim($_POST['email']);
     $password = $_POST['password'];
-    $remember_me = isset($_POST['remember_me']);
 
     // GET USER
 
@@ -89,6 +41,24 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
             $error = "Your account is locked.";
 
+            logAudit(
+                $pdo,
+                $user['user_id'],
+                'LOCKED_LOGIN_ATTEMPT',
+                'Locked account attempted to log in'
+            );
+
+        } elseif ($user['account_status'] !== 'active') {
+
+            $error = "Your account is not active.";
+
+            logAudit(
+                $pdo,
+                $user['user_id'],
+                'LOGIN_BLOCKED',
+                'Inactive or suspended account attempted to log in'
+            );
+
         } else {
 
             // VERIFY PASSWORD
@@ -99,7 +69,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                 $reset_stmt = $pdo->prepare("
                     UPDATE user
-                    SET failed_login_attempts = 0
+                    SET 
+                        failed_login_attempts = 0,
+                        last_login = CURRENT_TIMESTAMP
                     WHERE user_id = ?
                 ");
 
@@ -113,32 +85,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $_SESSION['role'] = $user['role_name'];
                 $_SESSION['full_name'] = $user['full_name'];
 
-                // REMEMBER ME COOKIE
-
-                if ($remember_me) {
-
-                    setcookie(
-                        'shopeasy_remember_me',
-                        $user['user_id'],
-                        time() + (86400 * 30),
-                        "/",
-                        "",
-                        false,
-                        true
-                    );
-                }
-
                 // ---------------- AUDIT LOGGING ----------------
-
-                $log_stmt = $pdo->prepare("
-                    INSERT INTO audit_log (user_id, action)
-                    VALUES (?, ?)
-                ");
-
-                $log_stmt->execute([
+                logAudit(
+                    $pdo,
                     $user['user_id'],
-                    'Successful Login'
-                ]);
+                    'LOGIN_SUCCESS',
+                    'User logged in successfully'
+                );
 
                 // REDIRECT BASED ON ROLE
 
@@ -199,16 +152,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 }
 
                 // FAILED LOGIN AUDIT LOG
-
-                $fail_log = $pdo->prepare("
-                    INSERT INTO audit_log (user_id, action)
-                    VALUES (?, ?)
-                ");
-
-                $fail_log->execute([
-                    $user['user_id'],
-                    'Failed Login'
-                ]);
+                if ($attempts >= 3) {
+                    logAudit(
+                        $pdo,
+                        $user['user_id'],
+                        'ACCOUNT_LOCKED',
+                        'Account locked after 3 failed login attempts'
+                    );
+                } else {
+                    logAudit(
+                        $pdo,
+                        $user['user_id'],
+                        'LOGIN_FAILED',
+                        'Failed login attempt. Attempt count: ' . $attempts
+                    );
+                }
             }
         }
 
@@ -284,17 +242,10 @@ body{
 
 .options-row{
     display:flex;
-    justify-content:space-between;
+    justify-content:flex-end;
     align-items:center;
     font-size:12px;
     margin-bottom:20px;
-}
-
-.remember-me{
-    display:flex;
-    align-items:center;
-    gap:5px;
-    color:#555;
 }
 
 .forgot-link{
@@ -354,7 +305,7 @@ body{
     <?php if($error): ?>
 
         <div class="error">
-            <?php echo $error; ?>
+            <?php echo htmlspecialchars($error, ENT_QUOTES, 'UTF-8'); ?>
         </div>
 
     <?php endif; ?>
@@ -388,14 +339,6 @@ body{
         </div>
 
         <div class="options-row">
-
-            <label class="remember-me">
-
-                <input type="checkbox" name="remember_me">
-
-                Remember me
-
-            </label>
 
             <a href="forgot_password.php" class="forgot-link">
                 Forgot Password?

@@ -1,32 +1,19 @@
 <?php
-
-session_start();
-
-if (
-    !isset($_SESSION['role']) ||
-    $_SESSION['role'] !== 'admin'
-) {
-
-    header("Location: login.php");
-
-    exit();
-}
-
-?>
-    <?php
-
 session_start();
 require 'db_connect.php';
 
-// Security Check
+// Security Check: Allow admin Only
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     header("Location: login.php");
     exit();
 }
 
-$owner_name = $pdo->query("SELECT full_name FROM user WHERE user_id = {$_SESSION['user_id']}")->fetchColumn();
+// Get Owner Name securely
+$stmt = $pdo->prepare("SELECT full_name FROM user WHERE user_id = ?");
+$stmt->execute([$_SESSION['user_id']]);
+$owner_name = $stmt->fetchColumn();
 
-// --- HANDLE FORM SUBMISSIONS (Task 2 Requirement) ---
+// --- HANDLE FORM SUBMISSIONS  ---
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
    if (isset($_POST['add_product'])) {
 
@@ -54,16 +41,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $stmt2->execute([$new_product_id]);
 
     // 3. AUDIT LOGGING
-    $log_stmt = $pdo->prepare("
-        INSERT INTO audit_log (user_id, action)
-        VALUES (?, ?)
-    ");
-
-    $log_stmt->execute([
+    logAudit(
+        $pdo,
         $_SESSION['user_id'],
-        'Admin Added Product'
-    ]);
-
+        'PRODUCT_ADD',
+        'Admin added new product: ' . $_POST['new_name'] . ' with product ID ' . $new_product_id
+    );
 
 } elseif (isset($_POST['delete_product'])) {
 
@@ -78,15 +61,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     ]);
 
     // AUDIT LOGGING
-    $log_stmt = $pdo->prepare("
-        INSERT INTO audit_log (user_id, action)
-        VALUES (?, ?)
-    ");
-
-    $log_stmt->execute([
+    logAudit(
+        $pdo,
         $_SESSION['user_id'],
-        'Admin Deleted Product'
-    ]);
+        'PRODUCT_DELETE',
+        'Admin deleted product with product ID ' . $_POST['delete_id']
+    );
 }
     // Refresh to prevent duplicate form submissions
     header("Location: admin_products.php");

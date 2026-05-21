@@ -1,35 +1,20 @@
-
-<?php
-
-session_start();
-
-if (
-    !isset($_SESSION['role']) ||
-    $_SESSION['role'] !== 'admin'
-) {
-
-    header("Location: login.php");
-
-    exit();
-}
-
-?>
 <?php
 session_start();
 require 'db_connect.php';
 
-// Security Check
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+// Security Check: Admin Only
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     header("Location: login.php");
     exit();
 }
 
-// --- FETCH LIVE DATA FROM HABIBA'S DATABASE ---
+// --- FETCH LIVE DATA FROM DATABASE ---
+$admin_id = (int) $_SESSION['user_id'];
 
 // 1. Get Owner Name
 $stmt = $pdo->prepare("SELECT full_name FROM user WHERE user_id = ?");
-$stmt->execute([$_SESSION['user_id']]);
-$owner_name = $stmt->fetchColumn();
+$stmt->execute([$admin_id]);
+$owner_name = $stmt->fetchColumn() ?: 'Admin';
 
 // 2. Dashboard Metrics
 $orders_today = $pdo->query("SELECT COUNT(*) FROM orders WHERE DATE(ordered_at) = CURDATE()")->fetchColumn();
@@ -111,7 +96,7 @@ $drivers = $pdo->query("
   <div class="navbar">
     <span class="nav-brand">ShopEasy Admin Panel</span>
     <div class="nav-links">
-      <span>Logged in as: <strong><?php echo htmlspecialchars($owner_name); ?></strong></span>
+      <span>Logged in as: <strong><?php echo htmlspecialchars($owner_name, ENT_QUOTES, 'UTF-8'); ?></strong></span>
       <a href="logout.php">Logout</a>
     </div>
   </div>
@@ -150,11 +135,11 @@ $drivers = $pdo->query("
                       if ($order['order_status'] == 'cancelled') $badge = 'badge-danger';
 
                       echo "<tr>
-                              <td>#{$order['order_id']}</td>
+                              <td>#" . (int)$order['order_id'] . "</td>
                               <td>" . htmlspecialchars($order['customer']) . "</td>
-                              <td>{$order['items']} items</td>
+                              <td>" . (int)$order['items'] . " items</td>
                               <td>RM " . number_format($order['total_amount'], 2) . "</td>
-                              <td><span class='badge {$badge}'>" . ucfirst($order['order_status']) . "</span></td>
+                              <td><span class='badge {$badge}'>" . htmlspecialchars(ucfirst($order['order_status']), ENT_QUOTES, 'UTF-8') . "</span></td>
                             </tr>";
                   }
               } else {
@@ -174,7 +159,7 @@ $drivers = $pdo->query("
                     $badge = $alert['quantity_available'] <= 0 ? 'badge-danger' : 'badge-warn';
                     echo "<div class='list-row'>
                             <span>" . htmlspecialchars($alert['product_name']) . "</span>
-                            <span class='badge {$badge}'>{$alert['quantity_available']} left</span>
+                            <span class='badge {$badge}'>" . (int)$alert['quantity_available'] . " left</span>
                           </div>";
                 }
             } else {
@@ -190,7 +175,7 @@ $drivers = $pdo->query("
                 $badge = $driver['status'] == 'Available' ? 'badge-success' : 'badge-warn';
                 echo "<div class='list-row'>
                         <span>" . htmlspecialchars($driver['full_name']) . "</span>
-                        <span class='badge {$badge}'>{$driver['status']}</span>
+                        <span class='badge {$badge}'>" . htmlspecialchars($driver['status'], ENT_QUOTES, 'UTF-8') . "</span>
                       </div>";
             }
             ?>

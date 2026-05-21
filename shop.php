@@ -1,24 +1,14 @@
 <?php
-
-session_start();
-
-if (!isset($_SESSION['user_id'])) {
-
-    header("Location: login.php");
-
-    exit();
-}
-
-?>
-<?php
 session_start();
 require 'db_connect.php';
 
-// Security Check: Ensure user is logged in
-if (!isset($_SESSION['user_id'])) {
+// Security Check: Customer Only
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'customer') {
     header("Location: login.php");
     exit();
 }
+
+$user_id = (int) $_SESSION['user_id'];
 
 // Initialize cart if it doesn't exist
 if (!isset($_SESSION['cart'])) {
@@ -27,122 +17,244 @@ if (!isset($_SESSION['cart'])) {
 
 // Add to Cart action
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_to_cart'])) {
-    $product_id = $_POST['product_id'];
-    $product_name = $_POST['product_name'];
-    $product_price = $_POST['product_price'];
 
-    if (isset($_SESSION['cart'][$product_id])) {
-        $_SESSION['cart'][$product_id]['quantity'] += 1;
-    } else {
-        $_SESSION['cart'][$product_id] = [
-            'name' => $product_name,
-            'price' => $product_price,
-            'quantity' => 1
-        ];
+    $product_id = (int) $_POST['product_id'];
+
+    // Fetch product details from database instead of trusting hidden form values
+    $stmt = $pdo->prepare("
+        SELECT 
+            p.product_id,
+            p.product_name,
+            p.price,
+            i.quantity_available
+        FROM product p
+        JOIN inventory i ON p.product_id = i.product_id
+        WHERE p.product_id = ?
+        AND p.is_active = 1
+    ");
+
+    $stmt->execute([$product_id]);
+    $product = $stmt->fetch();
+
+    if ($product && $product['quantity_available'] > 0) {
+
+        if (isset($_SESSION['cart'][$product_id])) {
+            if ($_SESSION['cart'][$product_id]['quantity'] < $product['quantity_available']) {
+                $_SESSION['cart'][$product_id]['quantity'] += 1;
+            }
+        } else {
+            $_SESSION['cart'][$product_id] = [
+                'name' => $product['product_name'],
+                'price' => (float) $product['price'],
+                'quantity' => 1
+            ];
+        }
     }
+
     header("Location: shop.php");
     exit();
 }
 
 // Remove from Cart action
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['remove_from_cart'])) {
-    $product_id = $_POST['product_id'];
-    
+
+    $product_id = (int) $_POST['product_id'];
+
     if (isset($_SESSION['cart'][$product_id])) {
         unset($_SESSION['cart'][$product_id]);
     }
-    
+
     header("Location: shop.php");
     exit();
 }
 
-// Order & Payment Placement (Saves to orders, location, and payment tables!)
+// Order & Payment Placement
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) && !empty($_SESSION['cart'])) {
-    $user_id = $_SESSION['user_id'];
+
     $payment_method = $_POST['payment_method'];
-    
-    // Capture Delivery Details from the form
-    $address = trim($_POST['address']);
-    $city = trim($_POST['city']);
-    $postcode = trim($_POST['postcode']);
-    
-    $total_amount = 0;
-    foreach ($_SESSION['cart'] as $item) {
-        $total_amount += ($item['price'] * $item['quantity']);
-    }
 
-    try {
-        // Start transaction to keep data perfectly synchronized
-        $pdo->beginTransaction();
+    $allowed_methods = ['Credit Card', 'Debit Card', 'FPX Online Banking'];
+    if (!in_array($payment_method, $allowed_methods, true)) {
+        $order_error = "Invalid payment method selected.";
+    } else {
 
-        // 1. Handle Delivery Location (Update if exists, Insert if new)
-        $loc_stmt = $pdo->prepare("SELECT location_id FROM location WHERE user_id = ? LIMIT 1");
-        $loc_stmt->execute([$user_id]);
-        $loc = $loc_stmt->fetch();
+        $address = trim($_POST['address']);
+        $city = trim($_POST['city']);
+        $postcode = trim($_POST['postcode']);
 
-        if ($loc) {
-            $location_id = $loc['location_id'];
-            $upd_loc = $pdo->prepare("UPDATE location SET address_line = ?, city = ?, postcode = ? WHERE location_id = ?");
-            $upd_loc->execute([$address, $city, $postcode, $location_id]);
-        } else {
-            $ins_loc = $pdo->prepare("INSERT INTO location (user_id, address_line, city, postcode) VALUES (?, ?, ?, ?)");
-            $ins_loc->execute([$user_id, $address, $city, $postcode]);
-            $location_id = $pdo->lastInsertId(); 
+        try {
+            // Start transaction to keep order, stock, payment, and audit logging synchronized
+            $pdo->beginTransaction();
+
+            $validated_cart = [];
+            $total_amount = 0;
+
+            // Validate products and stock using database values
+            foreach ($_SESSION['cart'] as $product_id => $item) {
+
+                $product_id = (int) $product_id;
+                $quantity = max(1, (int) $item['quantity']);
+
+                $product_stmt = $pdo->prepare("
+                    SELECT 
+                        p.product_id,
+                        p.product_name,
+                        p.price,
+                        i.quantity_available
+                    FROM product p
+                    JOIN inventory i ON p.product_id = i.product_id
+                    WHERE p.product_id = ?
+                    AND p.is_active = 1
+                    FOR UPDATE
+                ");
+
+                $product_stmt->execute([$product_id]);
+                $product = $product_stmt->fetch();
+
+                if (!$product || $product['quantity_available'] < $quantity) {
+                    throw new Exception("Stock unavailable");
+                }
+
+                $unit_price = (float) $product['price'];
+                $total_amount += $unit_price * $quantity;
+
+                $validated_cart[] = [
+                    'product_id' => $product_id,
+                    'quantity' => $quantity,
+                    'unit_price' => $unit_price
+                ];
+            }
+
+            // 1. Handle Delivery Location
+            $loc_stmt = $pdo->prepare("SELECT location_id FROM location WHERE user_id = ? LIMIT 1");
+            $loc_stmt->execute([$user_id]);
+            $loc = $loc_stmt->fetch();
+
+            if ($loc) {
+                $location_id = $loc['location_id'];
+
+                $upd_loc = $pdo->prepare("
+                    UPDATE location
+                    SET address_line = ?, city = ?, postcode = ?
+                    WHERE location_id = ?
+                    AND user_id = ?
+                ");
+
+                $upd_loc->execute([
+                    $address,
+                    $city,
+                    $postcode,
+                    $location_id,
+                    $user_id
+                ]);
+
+            } else {
+                $ins_loc = $pdo->prepare("
+                    INSERT INTO location 
+                    (user_id, address_line, city, postcode, is_default)
+                    VALUES (?, ?, ?, ?, 1)
+                ");
+
+                $ins_loc->execute([
+                    $user_id,
+                    $address,
+                    $city,
+                    $postcode
+                ]);
+
+                $location_id = $pdo->lastInsertId();
+            }
+
+            // 2. Create main order record
+            $stmt = $pdo->prepare("
+                INSERT INTO orders 
+                (customer_id, location_id, total_amount, order_status)
+                VALUES (?, ?, ?, 'pending')
+            ");
+
+            $stmt->execute([
+                $user_id,
+                $location_id,
+                $total_amount
+            ]);
+
+            $order_id = $pdo->lastInsertId();
+
+            // 3. Insert order items and deduct stock
+            foreach ($validated_cart as $cart_item) {
+
+                $stmt = $pdo->prepare("
+                    INSERT INTO order_item 
+                    (order_id, product_id, quantity, unit_price)
+                    VALUES (?, ?, ?, ?)
+                ");
+
+                $stmt->execute([
+                    $order_id,
+                    $cart_item['product_id'],
+                    $cart_item['quantity'],
+                    $cart_item['unit_price']
+                ]);
+
+                $stock_stmt = $pdo->prepare("
+                    UPDATE inventory
+                    SET quantity_available = quantity_available - ?
+                    WHERE product_id = ?
+                    AND quantity_available >= ?
+                ");
+
+                $stock_stmt->execute([
+                    $cart_item['quantity'],
+                    $cart_item['product_id'],
+                    $cart_item['quantity']
+                ]);
+
+                if ($stock_stmt->rowCount() === 0) {
+                    throw new Exception("Stock update failed");
+                }
+            }
+
+            // 4. Populate Payment table
+            $transaction_ref = "TXN-" . date("Y") . "-" . str_pad(rand(1, 9999), 4, "0", STR_PAD_LEFT);
+
+            $pay_stmt = $pdo->prepare("
+                INSERT INTO payment 
+                (order_id, payment_method, payment_status, transaction_reference, paid_at)
+                VALUES (?, ?, 'paid', ?, CURRENT_TIMESTAMP)
+            ");
+
+            $pay_stmt->execute([
+                $order_id,
+                $payment_method,
+                $transaction_ref
+            ]);
+
+            // 5. Correct Audit Logging
+            logAudit(
+                $pdo,
+                $user_id,
+                'ORDER_PLACED',
+                'Customer placed order ID ' . $order_id . ' with total amount RM ' . number_format($total_amount, 2)
+            );
+
+            $pdo->commit();
+
+            $_SESSION['cart'] = [];
+            $order_success = "Payment Successful! Order #$order_id has been securely verified.";
+
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            $order_error = "Payment processing failed. Please check stock availability and try again.";
         }
-
-        // 2. Create the main order record, now linked to the verified location
-        $stmt = $pdo->prepare("INSERT INTO orders (customer_id, location_id, total_amount, order_status) VALUES (?, ?, ?, 'pending')");
-        $stmt->execute([$user_id, $location_id, $total_amount]);
-        $order_id = $pdo->lastInsertId(); 
-
-        // 3. Insert items and deduct stock quantities
-        foreach ($_SESSION['cart'] as $product_id => $item) {
-            $stmt = $pdo->prepare("INSERT INTO order_item (order_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)");
-            $stmt->execute([$order_id, $product_id, $item['quantity'], $item['price']]);
-
-            $stock_stmt = $pdo->prepare("UPDATE inventory SET quantity_available = quantity_available - ? WHERE product_id = ?");
-            $stock_stmt->execute([$item['quantity'], $product_id]);
-        }
-
-        // 4. Populate Payment table
-        $transaction_ref = "TXN-" . date("Y") . "-" . str_pad(rand(1, 9999), 4, "0", STR_PAD_LEFT);
-        $pay_stmt = $pdo->prepare("INSERT INTO payment (order_id, payment_method, payment_status, transaction_reference, paid_at) VALUES (?, ?, 'paid', ?, CURRENT_TIMESTAMP)");
-       $pay_stmt->execute([
-    $order_id,
-    $payment_method,
-    $transaction_ref
-]);
-
-// AUDIT LOGGING
-$log_stmt = $pdo->prepare("
-    INSERT INTO audit_log (user_id, action)
-    VALUES (?, ?)
-");
-
-$log_stmt->execute([
-    $user_id,
-    'Customer Placed Order'
-]);
-
-        $pdo->commit();
-
-        // Clear session cart state and signal success
-        $_SESSION['cart'] = [];
-        $order_success = "Payment Successful! Order #$order_id has been securely verified.";
-
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        $order_error = "Payment processing transaction aborted: " . $e->getMessage();
     }
 }
 
-// Fetch current user location to pre-fill the delivery form if it exists
+// Fetch current user location to pre-fill the delivery form
 $current_loc = null;
-if (isset($_SESSION['user_id'])) {
-    $loc_stmt = $pdo->prepare("SELECT * FROM location WHERE user_id = ? LIMIT 1");
-    $loc_stmt->execute([$_SESSION['user_id']]);
-    $current_loc = $loc_stmt->fetch();
-}
+
+$loc_stmt = $pdo->prepare("SELECT * FROM location WHERE user_id = ? LIMIT 1");
+$loc_stmt->execute([$user_id]);
+$current_loc = $loc_stmt->fetch();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -238,9 +350,7 @@ if (isset($_SESSION['user_id'])) {
             <div class="product-price">RM ' . number_format($row["price"], 2) . '</div>
             <span class="badge ' . $badgeClass . '">' . $badgeText . '</span><br>
             <form method="POST" action="shop.php">
-                <input type="hidden" name="product_id" value="' . $row["product_id"] . '">
-                <input type="hidden" name="product_name" value="' . htmlspecialchars($row["product_name"]) . '">
-                <input type="hidden" name="product_price" value="' . $row["price"] . '">
+                <input type="hidden" name="product_id" value="' . (int) $row["product_id"] . '">
                 <button type="submit" name="add_to_cart" class="add-btn" ' . $disabled . '>' . $btnText . '</button>
             </form>
           </div>';
@@ -269,7 +379,7 @@ if (isset($_SESSION['user_id'])) {
                           <div style="display: flex; align-items: center; gap: 10px;">
                             <span>RM ' . number_format($item_total, 2) . '</span>
                             <form method="POST" action="shop.php" style="margin: 0; padding: 0;">
-                              <input type="hidden" name="product_id" value="' . $product_id . '">
+                              <input type="hidden" name="product_id" value="' . (int) $product_id . '">
                               <button type="submit" name="remove_from_cart" style="background: none; border: none; color: #dc3545; font-weight: bold; cursor: pointer; font-size: 14px; padding: 0 4px;" title="Remove Item">✕</button>
                             </form>
                           </div>

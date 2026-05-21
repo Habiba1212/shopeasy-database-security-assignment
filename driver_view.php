@@ -4,17 +4,12 @@ session_start();
 
 require 'db_connect.php';
 
-// SECURITY CHECK
-
-if (
-    !isset($_SESSION['role']) ||
-    $_SESSION['role'] !== 'driver'
-) {
-
+// SECURITY CHECK: Allow driver only
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'driver') {
     header("Location: login.php");
-
     exit();
 }
+
 
 // ---------------- START DELIVERY ACTION ----------------
 
@@ -23,29 +18,44 @@ if (
     isset($_POST['start_delivery'])
 ) {
 
-    $delivery_id = $_POST['delivery_id'];
+    $delivery_id = (int) $_POST['delivery_id'];
+    $driver_id = (int) $_SESSION['user_id'];
 
     // UPDATE DELIVERY STATUS
 
-    $stmt = $pdo->prepare("
+       $stmt = $pdo->prepare("
         UPDATE delivery
         SET delivery_status = 'out_for_delivery'
         WHERE delivery_id = ?
+        AND driver_id = ?
+        AND delivery_status = 'assigned'
     ");
 
-    $stmt->execute([$delivery_id]);
-
-    // AUDIT LOGGING
-
-    $log_stmt = $pdo->prepare("
-        INSERT INTO audit_log (user_id, action)
-        VALUES (?, ?)
-    ");
-
-    $log_stmt->execute([
-        $_SESSION['user_id'],
-        'Driver Updated Delivery Status'
+    $stmt->execute([
+        $delivery_id,
+        $driver_id
     ]);
+
+    if ($stmt->rowCount() > 0) {
+
+        // AUDIT LOGGING: Successful delivery status update
+        logAudit(
+            $pdo,
+            $driver_id,
+            'DELIVERY_STATUS_UPDATE',
+            'Driver started delivery ID ' . $delivery_id
+        );
+
+    } else {
+
+        // AUDIT LOGGING: Failed or unauthorized update attempt
+        logAudit(
+            $pdo,
+            $driver_id,
+            'DELIVERY_UPDATE_FAILED',
+            'Driver attempted to update delivery ID ' . $delivery_id . ' but it was not assigned or already updated'
+        );
+    }
 
     header("Location: driver_view.php");
 
@@ -137,48 +147,53 @@ if (count($deliveries) > 0) {
 
     foreach ($deliveries as $delivery) {
 
-        echo "
+    $order_id = (int) $delivery['order_id'];
+    $delivery_id = (int) $delivery['delivery_id'];
+    $customer_name = htmlspecialchars($delivery['full_name'], ENT_QUOTES, 'UTF-8');
+    $delivery_status = htmlspecialchars($delivery['delivery_status'], ENT_QUOTES, 'UTF-8');
 
-        <div class='card'>
+    echo "
 
-            <h3>
-                Order #{$delivery['order_id']}
-            </h3>
+    <div class='card'>
 
-            <p>
-                Customer:
-                {$delivery['full_name']}
-            </p>
+        <h3>
+            Order #{$order_id}
+        </h3>
 
-            <p>
-                Status:
-                {$delivery['delivery_status']}
-            </p>
+        <p>
+            Customer:
+            {$customer_name}
+        </p>
 
-            <form method='POST'>
+        <p>
+            Status:
+            {$delivery_status}
+        </p>
 
-                <input
-                    type='hidden'
-                    name='delivery_id'
-                    value='{$delivery['delivery_id']}'
-                >
+        <form method='POST'>
 
-                <button
-                    type='submit'
-                    name='start_delivery'
-                    class='btn'
-                >
+            <input
+                type='hidden'
+                name='delivery_id'
+                value='{$delivery_id}'
+            >
 
-                    Start Delivery
+            <button
+                type='submit'
+                name='start_delivery'
+                class='btn'
+            >
 
-                </button>
+                Start Delivery
 
-            </form>
+            </button>
 
-        </div>
+        </form>
 
-        ";
-    }
+    </div>
+
+    ";
+}
 
 } else {
 

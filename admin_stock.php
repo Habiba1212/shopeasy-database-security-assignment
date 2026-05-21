@@ -1,33 +1,23 @@
 <?php
-
-session_start();
-
-if (
-    !isset($_SESSION['role']) ||
-    $_SESSION['role'] !== 'admin'
-) {
-
-    header("Location: login.php");
-
-    exit();
-}
-
-?>
-    <?php
-
 session_start();
 require 'db_connect.php';
 
-// Security Check
+// Security Check: Allow admin only
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     header("Location: login.php");
     exit();
 }
 
-$owner_name = $pdo->query("SELECT full_name FROM user WHERE user_id = {$_SESSION['user_id']}")->fetchColumn();
+// Get Owner Name securely
+$stmt = $pdo->prepare("SELECT full_name FROM user WHERE user_id = ?");
+$stmt->execute([$_SESSION['user_id']]);
+$owner_name = $stmt->fetchColumn();
 
 // --- HANDLE STOCK UPDATES ---
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_stock'])) {
+
+      $product_id = (int) $_POST['product_id'];
+      $new_qty = max(0, (int) $_POST['new_qty']);
 
     // UPDATE STOCK
     $stmt = $pdo->prepare("
@@ -37,20 +27,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_stock'])) {
     ");
 
     $stmt->execute([
-        $_POST['new_qty'],
-        $_POST['product_id']
+        $new_qty,
+        $product_id
     ]);
 
     // AUDIT LOGGING
-    $log_stmt = $pdo->prepare("
-        INSERT INTO audit_log (user_id, action)
-        VALUES (?, ?)
-    ");
-
-    $log_stmt->execute([
+    logAudit(
+        $pdo,
         $_SESSION['user_id'],
-        'Admin Updated Stock'
-    ]);
+        'STOCK_UPDATE',
+        'Admin updated stock for product ID ' . $product_id . ' to quantity ' . $new_qty
+    );
 
     header("Location: admin_stock.php");
 

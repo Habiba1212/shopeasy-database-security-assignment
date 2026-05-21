@@ -1,33 +1,19 @@
 <?php
-
-
-session_start();
-
-if (
-    !isset($_SESSION['role']) ||
-    $_SESSION['role'] !== 'admin'
-) {
-
-    header("Location: login.php");
-
-    exit();
-}
-
-?>
-<?php
 session_start();
 require 'db_connect.php';
 
-// Security Check
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+// Security Check: Admin Only
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     header("Location: login.php");
     exit();
 }
 
+$admin_id = (int) $_SESSION['user_id'];
+
 // Get Owner Name
 $stmt = $pdo->prepare("SELECT full_name FROM user WHERE user_id = ?");
-$stmt->execute([$_SESSION['user_id']]);
-$owner_name = $stmt->fetchColumn();
+$stmt->execute([$admin_id]);
+$owner_name = $stmt->fetchColumn() ?: 'Admin';
 
 // Fetch all Drivers (role_id = 3) and their current delivery status
 $drivers = $pdo->query("
@@ -77,7 +63,7 @@ $drivers = $pdo->query("
   <div class="navbar">
     <span class="nav-brand">ShopEasy Admin Panel</span>
     <div class="nav-links">
-      <span>Logged in as: <strong><?php echo htmlspecialchars($owner_name); ?></strong></span>
+      <span>Logged in as: <strong><?php echo htmlspecialchars($owner_name, ENT_QUOTES, 'UTF-8'); ?></strong></span>
       <a href="logout.php">Logout</a>
     </div>
   </div>
@@ -102,17 +88,23 @@ $drivers = $pdo->query("
               <?php
               if (count($drivers) > 0) {
                   foreach ($drivers as $d) {
-                      $badge = 'badge-info';
-                      if ($d['current_status'] == 'Available') $badge = 'badge-success';
-                      if ($d['current_status'] == 'out_for_delivery') $badge = 'badge-warn';
-                      
-                      echo "<tr>
-                              <td>#{$d['user_id']}</td>
-                              <td><strong>" . htmlspecialchars($d['full_name']) . "</strong></td>
-                              <td>" . htmlspecialchars($d['phone'] ?? 'N/A') . "</td>
-                              <td><span class='badge {$badge}'>" . str_replace('_', ' ', ucfirst($d['current_status'])) . "</span></td>
-                            </tr>";
-                  }
+                       $badge = 'badge-info';
+
+                        if ($d['current_status'] == 'Available') {
+                            $badge = 'badge-success';
+                        }
+
+                        if ($d['current_status'] == 'out_for_delivery') {
+                            $badge = 'badge-warn';
+                        }
+
+                        echo "<tr>
+                                <td>#" . (int)$d['user_id'] . "</td>
+                                <td><strong>" . htmlspecialchars($d['full_name'], ENT_QUOTES, 'UTF-8') . "</strong></td>
+                                <td>" . htmlspecialchars($d['phone'] ?? 'N/A', ENT_QUOTES, 'UTF-8') . "</td>
+                                <td><span class='badge {$badge}'>" . htmlspecialchars(str_replace('_', ' ', ucfirst($d['current_status'])), ENT_QUOTES, 'UTF-8') . "</span></td>
+                              </tr>";
+                    }
               } else {
                   echo "<tr><td colspan='4' style='text-align:center;'>No drivers found.</td></tr>";
               }

@@ -1,26 +1,24 @@
-<?php
 
-session_start();
-
-if (!isset($_SESSION['user_id'])) {
-
-    header("Location: login.php");
-
-    exit();
-}
-
-?>
 <?php
 session_start();
 require 'db_connect.php';
 
-// If they aren't logged in, send them to the login page
-if (!isset($_SESSION['user_id'])) {
+// Security Check: Customer Only
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'customer') {
     header("Location: login.php");
     exit();
 }
 
-$user_id = $_SESSION['user_id'];
+$user_id = (int) $_SESSION['user_id'];
+
+$stmt = $pdo->prepare("
+    SELECT order_id, total_amount, order_status, ordered_at
+    FROM orders
+    WHERE customer_id = ?
+    ORDER BY ordered_at DESC
+");
+$stmt->execute([$user_id]);
+$orders = $stmt->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">

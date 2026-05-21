@@ -1,28 +1,14 @@
-
 <?php
 
-session_start();
-
-if (
-    !isset($_SESSION['role']) ||
-    $_SESSION['role'] !== 'admin'
-) {
-
-    header("Location: login.php");
-
-    exit();
-}
-
-?>
-<?php
 session_start();
 require 'db_connect.php';
 
 // Security Check
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     header("Location: login.php");
     exit();
 }
+
 
 // Get Owner Name
 $stmt = $pdo->prepare("SELECT full_name FROM user WHERE user_id = ?");
@@ -84,8 +70,8 @@ $customers = $pdo->query("
       <div class="side-menu">
         <a href="admin_dashboard.php" style="text-decoration: none;"><div class="side-item">Dashboard</div></a>
         <a href="admin_orders.php" style="text-decoration: none;"><div class="side-item">Orders</div></a>
-        <a href="#" style="text-decoration: none;"><div class="side-item">Products</div></a>
-        <a href="#" style="text-decoration: none;"><div class="side-item">Stock</div></a>
+        <a href="admin_products.php" style="text-decoration: none;"><div class="side-item">Products</div></a>
+        <a href="admin_stock.php" style="text-decoration: none;"><div class="side-item">Stock</div></a>
         <a href="admin_drivers.php" style="text-decoration: none;"><div class="side-item">Drivers</div></a>
         <a href="admin_customers.php" style="text-decoration: none;"><div class="side-item active">Customers</div></a>
       </div>

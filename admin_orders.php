@@ -1,78 +1,157 @@
 <?php
-
-session_start();
-
-if (
-    !isset($_SESSION['role']) ||
-    $_SESSION['role'] !== 'admin'
-) {
-
-    header("Location: login.php");
-
-    exit();
-}
-
-?>
-<?php
-
 session_start();
 require 'db_connect.php';
 
 // Security Check: Admin Only
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     header("Location: login.php");
     exit();
 }
 
-$owner_name = $_SESSION['full_name'] ?? 'Admin';
+$admin_id = (int) $_SESSION['user_id'];
+
+// Get Owner Name securely
+$stmt = $pdo->prepare("SELECT full_name FROM user WHERE user_id = ?");
+$stmt->execute([$admin_id]);
+$owner_name = $stmt->fetchColumn() ?: 'Admin';
+
 $success_msg = '';
 $error_msg = '';
 
 // --- HANDLE DRIVER ASSIGNMENT ---
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['assign_driver'])) {
-    $order_id = $_POST['order_id'];
-    $driver_id = $_POST['driver_id'];
+
+    $order_id = (int) $_POST['order_id'];
+    $driver_id = (int) $_POST['driver_id'];
 
     try {
         $pdo->beginTransaction();
 
-        // 1. Get the location_id from the original order
-        $loc_stmt = $pdo->prepare("SELECT location_id FROM orders WHERE order_id = ?");
-        $loc_stmt->execute([$order_id]);
-        $location_id = $loc_stmt->fetchColumn();
+        // 1. Lock and verify that the order exists and is still dispatchable
+        $order_stmt = $pdo->prepare("
+            SELECT order_id, location_id, order_status
+            FROM orders
+            WHERE order_id = ?
+            AND order_status IN ('pending', 'processing')
+            FOR UPDATE
+        ");
+        $order_stmt->execute([$order_id]);
+        $order = $order_stmt->fetch();
 
-        // 2. Create the delivery record bridging the order, driver, and location
-        $stmt = $pdo->prepare("INSERT INTO delivery (order_id, driver_id, location_id, delivery_status) VALUES (?, ?, ?, 'assigned')");
-        $stmt->execute([$order_id, $driver_id, $location_id]);
+        if (!$order) {
+            throw new Exception("Order is not available for dispatch.");
+        }
 
-        // 3. Update the main order status so the customer knows it is moving
-        $update_stmt = $pdo->prepare("UPDATE orders SET order_status = 'shipped' WHERE order_id = ?");
+        // 2. Make sure the order is not already assigned to a delivery
+        $existing_stmt = $pdo->prepare("
+            SELECT delivery_id
+            FROM delivery
+            WHERE order_id = ?
+            LIMIT 1
+        ");
+        $existing_stmt->execute([$order_id]);
+
+        if ($existing_stmt->fetch()) {
+            throw new Exception("Order already has a delivery assignment.");
+        }
+
+        // 3. Verify selected driver exists, is active, and has driver role
+        $driver_stmt = $pdo->prepare("
+            SELECT u.user_id, u.full_name
+            FROM user u
+            JOIN user_role ur ON u.user_id = ur.user_id
+            WHERE u.user_id = ?
+            AND ur.role_id = 3
+            AND u.account_status = 'active'
+            LIMIT 1
+        ");
+        $driver_stmt->execute([$driver_id]);
+        $driver = $driver_stmt->fetch();
+
+        if (!$driver) {
+            throw new Exception("Selected driver is invalid or inactive.");
+        }
+
+        $location_id = (int) $order['location_id'];
+
+        // 4. Create delivery record
+        $stmt = $pdo->prepare("
+            INSERT INTO delivery
+            (order_id, driver_id, location_id, delivery_status)
+            VALUES (?, ?, ?, 'assigned')
+        ");
+        $stmt->execute([
+            $order_id,
+            $driver_id,
+            $location_id
+        ]);
+
+        // 5. Update order status
+        $update_stmt = $pdo->prepare("
+            UPDATE orders
+            SET order_status = 'shipped'
+            WHERE order_id = ?
+            AND order_status IN ('pending', 'processing')
+        ");
         $update_stmt->execute([$order_id]);
 
+        // 6. Audit logging
+        logAudit(
+            $pdo,
+            $admin_id,
+            'DRIVER_ASSIGNMENT',
+            'Admin assigned driver ID ' . $driver_id . ' to order ID ' . $order_id
+        );
+
         $pdo->commit();
-        $success_msg = "<div class='msg-success'>Order #$order_id successfully dispatched to Driver #$driver_id!</div>";
+
+        $success_msg = "<div class='msg-success'>Order #" . $order_id . " successfully dispatched to Driver #" . $driver_id . ".</div>";
+
     } catch (Exception $e) {
-        $pdo->rollBack();
-        $error_msg = "<div class='error-msg'>Assignment failed. Order might already be assigned.</div>";
+
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        logAudit(
+            $pdo,
+            $admin_id,
+            'DRIVER_ASSIGNMENT_FAILED',
+            'Admin failed to assign driver ID ' . $driver_id . ' to order ID ' . $order_id
+        );
+
+        $error_msg = "<div class='error-msg'>Assignment failed. The order may already be assigned, unavailable, or the driver may be invalid.</div>";
     }
 }
 
-// Fetch all pending/processing orders to display
+// Fetch all pending/processing orders that do not already have a delivery
 $orders_stmt = $pdo->query("
-    SELECT o.order_id, o.total_amount, o.order_status, o.ordered_at, u.full_name as customer_name
+    SELECT 
+        o.order_id,
+        o.total_amount,
+        o.order_status,
+        o.ordered_at,
+        u.full_name AS customer_name
     FROM orders o
     JOIN user u ON o.customer_id = u.user_id
     WHERE o.order_status IN ('pending', 'processing')
+    AND NOT EXISTS (
+        SELECT 1
+        FROM delivery d
+        WHERE d.order_id = o.order_id
+    )
     ORDER BY o.ordered_at ASC
 ");
 $pending_orders = $orders_stmt->fetchAll();
 
-// Fetch all drivers for the dropdown menu
+// Fetch active drivers for dropdown
 $drivers_stmt = $pdo->query("
-    SELECT u.user_id, u.full_name 
-    FROM user u 
-    JOIN user_role ur ON u.user_id = ur.user_id 
-    WHERE ur.role_id = 3 AND u.account_status = 'active'
+    SELECT u.user_id, u.full_name
+    FROM user u
+    JOIN user_role ur ON u.user_id = ur.user_id
+    WHERE ur.role_id = 3
+    AND u.account_status = 'active'
+    ORDER BY u.full_name ASC
 ");
 $available_drivers = $drivers_stmt->fetchAll();
 ?>
@@ -155,26 +234,59 @@ $available_drivers = $drivers_stmt->fetchAll();
             <tbody>
               <?php if (count($pending_orders) > 0): ?>
                   <?php foreach ($pending_orders as $order): ?>
-                      <tr>
-                        <td><strong>#<?php echo $order['order_id']; ?></strong><br><span style="font-size:11px; color:#888;"><?php echo date('M d, H:i', strtotime($order['ordered_at'])); ?></span></td>
-                        <td><?php echo htmlspecialchars($order['customer_name']); ?><br><span style="font-size:11px; color:#185FA5; font-weight: bold;">RM <?php echo number_format($order['total_amount'], 2); ?></span></td>
-                        <td><span class='badge badge-warn'><?php echo ucfirst($order['order_status']); ?></span></td>
+                    <?php
+                        $order_id = (int) $order['order_id'];
+                        $customer_name = htmlspecialchars($order['customer_name'], ENT_QUOTES, 'UTF-8');
+                        $order_status = htmlspecialchars(ucfirst($order['order_status']), ENT_QUOTES, 'UTF-8');
+                        $ordered_at = date('M d, H:i', strtotime($order['ordered_at']));
+                        $total_amount = number_format((float) $order['total_amount'], 2);
+                    ?>
+                    <tr>
                         <td>
-                          <form method="POST" action="admin_orders.php" class="dispatch-form">
-                            <input type="hidden" name="order_id" value="<?php echo $order['order_id']; ?>">
-                            <select name="driver_id" class="dispatch-select" required>
-                                <option value="" disabled selected>Select a driver...</option>
-                                <?php foreach ($available_drivers as $driver): ?>
-                                    <option value="<?php echo $driver['user_id']; ?>">
-                                        <?php echo htmlspecialchars($driver['full_name']); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <button type="submit" name="assign_driver" class="btn-assign">Dispatch</button>
-                          </form>
+                            <strong>#<?php echo $order_id; ?></strong><br>
+                            <span style="font-size:11px; color:#888;">
+                                <?php echo $ordered_at; ?>
+                            </span>
                         </td>
-                      </tr>
-                  <?php endforeach; ?>
+
+                        <td>
+                            <?php echo $customer_name; ?><br>
+                            <span style="font-size:11px; color:#185FA5; font-weight: bold;">
+                                RM <?php echo $total_amount; ?>
+                            </span>
+                        </td>
+
+                        <td>
+                            <span class="badge badge-warn">
+                                <?php echo $order_status; ?>
+                            </span>
+                        </td>
+
+                        <td>
+                            <form method="POST" action="admin_orders.php" class="dispatch-form">
+                                <input type="hidden" name="order_id" value="<?php echo $order_id; ?>">
+
+                                <select name="driver_id" class="dispatch-select" required>
+                                    <option value="" disabled selected>Select a driver...</option>
+
+                                    <?php foreach ($available_drivers as $driver): ?>
+                                        <?php
+                                            $driver_id = (int) $driver['user_id'];
+                                            $driver_name = htmlspecialchars($driver['full_name'], ENT_QUOTES, 'UTF-8');
+                                        ?>
+                                        <option value="<?php echo $driver_id; ?>">
+                                            <?php echo $driver_name; ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+
+                                <button type="submit" name="assign_driver" class="btn-assign">
+                                    Dispatch
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
               <?php else: ?>
                   <tr><td colspan='4' style='text-align:center; padding: 30px; color: #888;'>No pending orders at the moment.</td></tr>
               <?php endif; ?>
