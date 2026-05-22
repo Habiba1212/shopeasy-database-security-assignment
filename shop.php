@@ -38,21 +38,38 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_to_cart'])) {
 
     if ($product && $product['quantity_available'] > 0) {
 
-        if (isset($_SESSION['cart'][$product_id])) {
-            if ($_SESSION['cart'][$product_id]['quantity'] < $product['quantity_available']) {
-                $_SESSION['cart'][$product_id]['quantity'] += 1;
-            }
-        } else {
-            $_SESSION['cart'][$product_id] = [
-                'name' => $product['product_name'],
-                'price' => (float) $product['price'],
-                'quantity' => 1
-            ];
-        }
-    }
+    // MAXIMUM STOCK LIMIT = 10
+    $max_stock_limit = min(10, (int) $product['quantity_available']);
 
+    // Product already exists in cart
+    if (isset($_SESSION['cart'][$product_id])) {
+
+        // Allow increase only if below stock limit
+        if ($_SESSION['cart'][$product_id]['quantity'] < $max_stock_limit) {
+
+            $_SESSION['cart'][$product_id]['quantity'] += 1;
+
+        } else {
+
+            $order_error = "Stock limit reached. Only " . $max_stock_limit . " item(s) available.";
+
+        }
+
+    } else {
+
+        // Add first item to cart
+        $_SESSION['cart'][$product_id] = [
+            'name' => $product['product_name'],
+            'price' => (float) $product['price'],
+            'quantity' => 1
+        ];
+    }
+}
+
+    if (!isset($order_error)) {
     header("Location: shop.php");
     exit();
+}
 }
 
 // Remove from Cart action
