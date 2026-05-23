@@ -5,14 +5,14 @@ header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 header("Expires: 0");
-require 'db_connect.php';
+
 
 // Security Check
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     header("Location: login.php");
     exit();
 }
-
+require 'db_connect.php';
 
 // Get Owner Name
 $stmt = $pdo->prepare("SELECT full_name FROM user WHERE user_id = ?");
