@@ -1,17 +1,23 @@
 <?php
 session_start();
+
+// Disable browser cache
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
-header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 header("Expires: 0");
 
-
-// Security Check: Allow admin Only
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+// ADMIN ONLY
+if (
+    !isset($_SESSION['user_id']) ||
+    !isset($_SESSION['role']) ||
+    $_SESSION['role'] !== 'admin'
+) {
     header("Location: login.php");
     exit();
 }
+
 require 'db_connect.php';
+require 'audit_helper.php';
 // Get Owner Name securely
 $stmt = $pdo->prepare("SELECT full_name FROM user WHERE user_id = ?");
 $stmt->execute([$_SESSION['user_id']]);
@@ -174,5 +180,21 @@ $products = $pdo->query("SELECT product_id, product_name, price, is_active, crea
     </div>
   </div>
 </div>
+
+<script>
+window.addEventListener('pageshow', function(event) {
+
+    if (
+        event.persisted ||
+        (window.performance &&
+         window.performance.navigation.type === 2)
+    ) {
+
+        window.location.href = 'login.php';
+    }
+
+});
+</script>
+
 </body>
 </html>
