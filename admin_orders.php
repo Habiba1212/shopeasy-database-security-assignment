@@ -1,14 +1,12 @@
 <?php
 session_start();
+
+// Disable browser cache
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
-header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 header("Expires: 0");
 
-
-// ===============================
-// SECURITY CHECK: ADMIN ONLY
-// ===============================
+// ADMIN ONLY
 if (
     !isset($_SESSION['user_id']) ||
     !isset($_SESSION['role']) ||
@@ -17,7 +15,9 @@ if (
     header("Location: login.php");
     exit();
 }
+
 require 'db_connect.php';
+require 'audit_helper.php';
 $admin_id = (int) $_SESSION['user_id'];
 
 // ===============================
