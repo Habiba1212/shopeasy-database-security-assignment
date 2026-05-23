@@ -5,13 +5,13 @@ header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 header("Expires: 0");
-require 'db_connect.php';
 
 // Security Check: Customer Only
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'customer') {
     header("Location: login.php");
     exit();
 }
+require 'db_connect.php';
 
 $user_id = (int) $_SESSION['user_id'];
 
