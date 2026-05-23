@@ -1,6 +1,8 @@
 <?php
 session_start();
+
 require 'db_connect.php';
+require 'audit_helper.php';
 
 // ---------------- LOGIN PROCESS ----------------
 
