@@ -1,16 +1,23 @@
 <?php
 session_start();
+
+// Disable browser cache
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
-header("Cache-Control: post-check=0, pre-check=0", false);
 header("Pragma: no-cache");
 header("Expires: 0");
 
-// Security Check: Customer Only
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'customer') {
+// CUSTOMER ONLY
+if (
+    !isset($_SESSION['user_id']) ||
+    !isset($_SESSION['role']) ||
+    $_SESSION['role'] !== 'customer'
+) {
     header("Location: login.php");
     exit();
 }
+
 require 'db_connect.php';
+require 'audit_helper.php';
 
 $user_id = (int) $_SESSION['user_id'];
 
@@ -494,6 +501,21 @@ $current_loc = $loc_stmt->fetch();
     </div>
   </div>
 </div>
+
+<script>
+window.addEventListener('pageshow', function(event) {
+
+    if (
+        event.persisted ||
+        (window.performance &&
+         window.performance.navigation.type === 2)
+    ) {
+
+        window.location.href = 'login.php';
+    }
+
+});
+</script>
 
 </body>
 </html>
