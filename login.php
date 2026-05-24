@@ -113,41 +113,35 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 exit();
 
             } else {
-
                 // WRONG PASSWORD
-
                 $attempts = $user['failed_login_attempts'] + 1;
 
                 // LOCK ACCOUNT AFTER 3 ATTEMPTS
-
                 if ($attempts >= 3) {
-
                     $lock_stmt = $pdo->prepare("
                         UPDATE user
-                        SET 
-                            failed_login_attempts = ?,
-                            account_status = 'locked'
+                        SET failed_login_attempts = ?, account_status = 'locked'
                         WHERE user_id = ?
                     ");
-
-                    $lock_stmt->execute([
-                        $attempts,
-                        $user['user_id']
-                    ]);
+                    $lock_stmt->execute([$attempts, $user['user_id']]);
 
                     $error = "Account locked after 3 failed attempts.";
 
+                    logAudit($pdo, $user['user_id'], 'ACCOUNT_LOCKED', 'Account locked after 3 failed login attempts');
                 } else {
-
-                    logAudit(
-            $pdo,
-            0, // 0 represents an unknown/unregistered user
-            'LOGIN_FAILED_UNKNOWN',
-            'Failed login attempt with unregistered email: ' . $email
-        );
+                    // FIX: Update the attempts counter even if it's below 3!
+                    $attempt_stmt = $pdo->prepare("
+                        UPDATE user
+                        SET failed_login_attempts = ?
+                        WHERE user_id = ?
+                    ");
+                    $attempt_stmt->execute([$attempts, $user['user_id']]);
 
                     $error = "Invalid email or password.";
+
+                    logAudit($pdo, $user['user_id'], 'LOGIN_FAILED', 'Failed login attempt. Attempt count: ' . $attempts);
                 }
+            }
 
                 // FAILED LOGIN AUDIT LOG
                 if ($attempts >= 3) {
@@ -172,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
         $error = "Invalid email or password.";
     }
-}
+
 ?>
 
 <!DOCTYPE html>
