@@ -26,31 +26,41 @@ $owner_name = $stmt->fetchColumn();
 // --- HANDLE STOCK UPDATES ---
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['update_stock'])) {
 
-      $product_id = (int) $_POST['product_id'];
-      $new_qty = max(0, (int) $_POST['new_qty']);
+    $product_id = (int) $_POST['product_id'];
+    $new_qty = max(0, (int) $_POST['new_qty']);
 
-    // UPDATE STOCK
-    $stmt = $pdo->prepare("
-        UPDATE inventory
-        SET quantity_available = ?
-        WHERE product_id = ?
-    ");
+    try {
+        // UPDATE STOCK
+        $stmt = $pdo->prepare("
+            UPDATE inventory
+            SET quantity_available = ?
+            WHERE product_id = ?
+        ");
 
-    $stmt->execute([
-        $new_qty,
-        $product_id
-    ]);
+        $stmt->execute([
+            $new_qty,
+            $product_id
+        ]);
 
-    // AUDIT LOGGING
-    logAudit(
-        $pdo,
-        $_SESSION['user_id'],
-        'STOCK_UPDATE',
-        'Admin updated stock for product ID ' . $product_id . ' to quantity ' . $new_qty
-    );
+        // SUCCESS AUDIT LOGGING
+        logAudit(
+            $pdo,
+            $_SESSION['user_id'],
+            'STOCK_UPDATE',
+            'Admin updated stock for product ID ' . $product_id . ' to quantity ' . $new_qty
+        );
+
+    } catch (Exception $e) {
+        // FAILURE AUDIT LOGGING
+        logAudit(
+            $pdo,
+            $_SESSION['user_id'],
+            'STOCK_UPDATE_FAILED',
+            'Admin failed to update stock for product ID ' . $product_id
+        );
+    }
 
     header("Location: admin_stock.php");
-
     exit();
 }
 
@@ -168,3 +178,4 @@ window.addEventListener('pageshow', function(event) {
 
 </body>
 </html>
+
