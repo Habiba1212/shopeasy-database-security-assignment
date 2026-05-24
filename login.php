@@ -139,16 +139,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                 } else {
 
-                    $attempt_stmt = $pdo->prepare("
-                        UPDATE user
-                        SET failed_login_attempts = ?
-                        WHERE user_id = ?
-                    ");
-
-                    $attempt_stmt->execute([
-                        $attempts,
-                        $user['user_id']
-                    ]);
+                    logAudit(
+            $pdo,
+            0, // 0 represents an unknown/unregistered user
+            'LOGIN_FAILED_UNKNOWN',
+            'Failed login attempt with unregistered email: ' . $email
+        );
 
                     $error = "Invalid email or password.";
                 }
