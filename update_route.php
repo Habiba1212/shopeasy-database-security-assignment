@@ -7,7 +7,11 @@ header("Pragma: no-cache");
 header("Expires: 0");
 
 // DRIVER ONLY CHECK
-if (!isset($_SESSION['user_id'])) {
+if (
+    !isset($_SESSION['user_id']) ||
+    !isset($_SESSION['role']) ||
+    $_SESSION['role'] !== 'driver'
+) {
     header("Location: login.php");
     exit();
 }
@@ -62,12 +66,12 @@ if (isset($_POST['action']) && $_POST['action'] === 'complete') {
 // ==========================================
 // HANDLE "START ROUTE" (INITIATE)
 // ==========================================
-// Update status to 'en_route' 
-$update_stmt = $pdo->prepare("UPDATE delivery SET delivery_status = 'en_route' WHERE delivery_id = ? AND driver_id = ? AND delivery_status = 'assigned'");
+// Update status to 'out_for_delivery' 
+$update_stmt = $pdo->prepare("UPDATE delivery SET delivery_status = 'out_for_delivery' WHERE delivery_id = ? AND driver_id = ? AND delivery_status = 'assigned'");
 $update_stmt->execute([$delivery_id, $driver_id]);
 
 if ($update_stmt->rowCount() > 0) {
-    // rowCount() > 0 means the status just successfully changed from 'assigned' to 'en_route'
+    // rowCount() > 0 means the status just successfully changed from 'assigned' to 'out_for_delivery'
     logAudit($pdo, $driver_id, 'ROUTE_STARTED', 'Driver started route for Delivery #' . $delivery_id);
 }
 // ==========================================
