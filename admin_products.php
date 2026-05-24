@@ -25,59 +25,53 @@ $owner_name = $stmt->fetchColumn();
 
 // --- HANDLE FORM SUBMISSIONS  ---
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-   if (isset($_POST['add_product'])) {
+    
+    if (isset($_POST['add_product'])) {
+        try {
+            // Start a transaction so both product and inventory insert together
+            $pdo->beginTransaction();
 
-    // 1. Insert into Product table
-    $stmt = $pdo->prepare("
-        INSERT INTO product 
-        (product_name, price, is_active) 
-        VALUES (?, ?, 1)
-    ");
+            // 1. Insert into Product table
+            $stmt = $pdo->prepare("INSERT INTO product (product_name, price, is_active) VALUES (?, ?, 1)");
+            $stmt->execute([$_POST['new_name'], $_POST['new_price']]);
+            $new_product_id = $pdo->lastInsertId();
 
-    $stmt->execute([
-        $_POST['new_name'],
-        $_POST['new_price']
-    ]);
+            // 2. Create inventory record
+            $stmt2 = $pdo->prepare("INSERT INTO inventory (product_id, quantity_available) VALUES (?, 0)");
+            $stmt2->execute([$new_product_id]);
 
-    $new_product_id = $pdo->lastInsertId();
+            // 3. SUCCESS AUDIT LOGGING
+            logAudit($pdo, $_SESSION['user_id'], 'PRODUCT_ADD', 'Admin added new product: ' . $_POST['new_name'] . ' with ID ' . $new_product_id);
 
-    // 2. Create inventory record
-    $stmt2 = $pdo->prepare("
-        INSERT INTO inventory 
-        (product_id, quantity_available) 
-        VALUES (?, 0)
-    ");
+            $pdo->commit();
+            
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack(); // Undo if something broke
+            }
+            // FAILURE AUDIT LOGGING
+            logAudit($pdo, $_SESSION['user_id'], 'PRODUCT_ADD_FAILED', 'Admin failed to add product: ' . $_POST['new_name']);
+        }
 
-    $stmt2->execute([$new_product_id]);
+    } elseif (isset($_POST['delete_product'])) {
+        try {
+            // Delete product
+            $stmt = $pdo->prepare("DELETE FROM product WHERE product_id = ?");
+            $stmt->execute([$_POST['delete_id']]);
 
-    // 3. AUDIT LOGGING
-    logAudit(
-        $pdo,
-        $_SESSION['user_id'],
-        'PRODUCT_ADD',
-        'Admin added new product: ' . $_POST['new_name'] . ' with product ID ' . $new_product_id
-    );
+            // Check if a row was actually deleted before logging success
+            if ($stmt->rowCount() > 0) {
+                logAudit($pdo, $_SESSION['user_id'], 'PRODUCT_DELETE', 'Admin deleted product with ID ' . $_POST['delete_id']);
+            } else {
+                throw new Exception("Product not found or could not be deleted.");
+            }
 
-} elseif (isset($_POST['delete_product'])) {
-
-    // Delete product
-    $stmt = $pdo->prepare("
-        DELETE FROM product 
-        WHERE product_id = ?
-    ");
-
-    $stmt->execute([
-        $_POST['delete_id']
-    ]);
-
-    // AUDIT LOGGING
-    logAudit(
-        $pdo,
-        $_SESSION['user_id'],
-        'PRODUCT_DELETE',
-        'Admin deleted product with product ID ' . $_POST['delete_id']
-    );
-}
+        } catch (Exception $e) {
+            // FAILURE AUDIT LOGGING (e.g. Foreign Key constraint blocked it)
+            logAudit($pdo, $_SESSION['user_id'], 'PRODUCT_DELETE_FAILED', 'Admin failed to delete product ID ' . $_POST['delete_id']);
+        }
+    }
+    
     // Refresh to prevent duplicate form submissions
     header("Location: admin_products.php");
     exit();
