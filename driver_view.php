@@ -7,7 +7,11 @@ header("Pragma: no-cache");
 header("Expires: 0");
 
 // DRIVER ONLY CHECK
-if (!isset($_SESSION['user_id'])) {
+if (
+    !isset($_SESSION['user_id']) ||
+    !isset($_SESSION['role']) ||
+    $_SESSION['role'] !== 'driver'
+) {
     header("Location: login.php");
     exit();
 }
@@ -220,7 +224,7 @@ foreach ($deliveries as $d) {
                     if ($delivery['delivery_status'] === 'assigned') {
                         $display_status = 'Pending Pickup';
                         $badge_class = 'badge-pending';
-                    } elseif ($delivery['delivery_status'] === 'en_route') {
+                    } elseif ($delivery['delivery_status'] === 'out_for_delivery') {
                         $display_status = 'On Route';
                         $badge_class = 'badge-route';
                     } elseif ($delivery['delivery_status'] === 'delivered') {
