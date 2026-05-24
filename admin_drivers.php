@@ -98,21 +98,24 @@ $drivers = $pdo->query("
               <?php
               if (count($drivers) > 0) {
                   foreach ($drivers as $d) {
-                       $badge = 'badge-info';
+                        
+                        // FIX: If the database returns a blank string, force it to 'Available'
+                        $raw_status = empty(trim($d['current_status'])) ? 'Available' : $d['current_status'];
 
-                        if ($d['current_status'] == 'Available') {
+                        $badge = 'badge-info';
+
+                        // Set colors based on actual statuses used in your system
+                        if ($raw_status === 'Available') {
                             $badge = 'badge-success';
-                        }
-
-                        if ($d['current_status'] == 'out_for_delivery') {
-                            $badge = 'badge-warn';
+                        } elseif ($raw_status === 'assigned' || $raw_status === 'en_route') {
+                            $badge = 'badge-warn'; // Yellow badge for active deliveries
                         }
 
                         echo "<tr>
                                 <td>#" . (int)$d['user_id'] . "</td>
                                 <td><strong>" . htmlspecialchars($d['full_name'], ENT_QUOTES, 'UTF-8') . "</strong></td>
                                 <td>" . htmlspecialchars($d['phone'] ?? 'N/A', ENT_QUOTES, 'UTF-8') . "</td>
-                                <td><span class='badge {$badge}'>" . htmlspecialchars(str_replace('_', ' ', ucfirst($d['current_status'])), ENT_QUOTES, 'UTF-8') . "</span></td>
+                                <td><span class='badge {$badge}'>" . htmlspecialchars(str_replace('_', ' ', ucfirst($raw_status)), ENT_QUOTES, 'UTF-8') . "</span></td>
                               </tr>";
                     }
               } else {
