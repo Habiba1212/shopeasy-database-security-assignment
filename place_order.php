@@ -17,11 +17,15 @@ if (
 }
 
 require 'db_connect.php';
+require_once 'audit_helper.php'; // 1. ADDED AUDIT HELPER
 
+// 2. FIXED: Use the actual logged-in user, not a hardcoded "1"
+$user_id = (int) $_SESSION['user_id']; 
 
+// NOTE: You currently have these hardcoded for testing. 
+// In your final app, these should come from $_POST or a Cart session!
 $product_id = 1;
 $quantity = 2;
-$user_id = 1;
 
 try {
 
@@ -36,11 +40,14 @@ try {
     ");
 
     $stmt->execute([$product_id]);
-
     $product = $stmt->fetch();
 
     // STOCK PROTECTION
     if ($product['quantity_available'] < $quantity) {
+        
+        // AUDIT LOGGING: Record the failed attempt due to stock
+        logAudit($pdo, $user_id, 'ORDER_FAILED_STOCK', 'Customer tried to order Product ID ' . $product_id . ' but stock was insufficient.');
+        
         die("Insufficient stock available");
     }
 
@@ -96,13 +103,21 @@ try {
         $quantity
     ]);
 
+    // 3. SUCCESS AUDIT LOGGING
+    logAudit($pdo, $user_id, 'ORDER_PLACED', 'Customer placed Order #' . $order_id . ' for RM ' . number_format($total_amount, 2));
+
     $pdo->commit();
 
     echo "Order placed successfully";
 
 } catch (Exception $e) {
 
-    $pdo->rollBack();
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    
+    // 4. FAILURE AUDIT LOGGING
+    logAudit($pdo, $user_id, 'ORDER_FAILED_ERROR', 'Customer checkout failed due to system error.');
 
     echo "Transaction failed";
 }
