@@ -14,24 +14,14 @@ try {
 }
 
 // Audit logging function
-function logAudit($pdo, $user_id, $action_type, $action_description) {
-    if (empty($user_id)) {
-        return false;
+if (!function_exists('logAudit')) {
+    function logAudit($pdo, $user_id, $action_type, $action_description) {
+        if (empty($user_id)) {
+            return false;
+        }
+        $ip_address = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        $stmt = $pdo->prepare("INSERT INTO audit_log (user_id, action_type, action_description, ip_address) VALUES (?, ?, ?, ?)");
+        return $stmt->execute([$user_id, $action_type, $action_description, $ip_address]);
     }
-
-    $ip_address = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
-
-    $stmt = $pdo->prepare("
-        INSERT INTO audit_log 
-        (user_id, action_type, action_description, ip_address)
-        VALUES (?, ?, ?, ?)
-    ");
-
-    return $stmt->execute([
-        $user_id,
-        $action_type,
-        $action_description,
-        $ip_address
-    ]);
 }
 ?>
