@@ -1,6 +1,7 @@
 <?php
 session_start();
 require 'db_connect.php';
+require_once 'audit_helper.php'; // 1. ADDED AUDIT HELPER
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['register'])) {
     $full_name = $_POST['full_name'];
@@ -27,10 +28,31 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['register'])) {
         $loc_stmt = $pdo->prepare("INSERT INTO location (user_id, address_line, city, postcode, is_default) VALUES (?, 'Not Specified Yet', 'Kuala Lumpur', '50000', 1)");
         $loc_stmt->execute([$new_user_id]);
 
+        // 5. SUCCESS AUDIT LOGGING (Using the newly generated user ID)
+        logAudit(
+            $pdo, 
+            $new_user_id, 
+            'USER_REGISTERED', 
+            'New customer account created for email: ' . $email
+        );
+
         $pdo->commit();
         $success_msg = "Account created successfully! You can now log in.";
+        
     } catch (Exception $e) {
-        $pdo->rollBack();
+        
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        
+        // 6. FAILURE AUDIT LOGGING (Using ID 0 for unknown/failed user)
+        logAudit(
+            $pdo, 
+            0, 
+            'REGISTER_FAILED', 
+            'Failed registration attempt for email: ' . $email
+        );
+        
         $error_msg = "Registration failed. Email might already exist.";
     }
 }
