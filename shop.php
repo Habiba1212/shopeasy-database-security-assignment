@@ -17,7 +17,7 @@ if (
 }
 
 require 'db_connect.php';
-require 'audit_helper.php';
+require_once 'audit_helper.php';
 
 $user_id = (int) $_SESSION['user_id'];
 
@@ -26,12 +26,14 @@ if (!isset($_SESSION['cart'])) {
     $_SESSION['cart'] = [];
 }
 
-// Add to Cart action
+// ==========================================
+// 1. ADD TO CART
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_to_cart'])) {
 
     $product_id = (int) $_POST['product_id'];
 
-    // Fetch product details from database instead of trusting hidden form values
+    // Fetch product details from database
     $stmt = $pdo->prepare("
         SELECT 
             p.product_id,
@@ -49,41 +51,38 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['add_to_cart'])) {
 
     if ($product && $product['quantity_available'] > 0) {
 
-    // MAXIMUM STOCK LIMIT = 10
-    $max_stock_limit = min(10, (int) $product['quantity_available']);
+        // MAXIMUM STOCK LIMIT = 10
+        $max_stock_limit = min(10, (int) $product['quantity_available']);
 
-    // Product already exists in cart
-    if (isset($_SESSION['cart'][$product_id])) {
+        // Product already exists in cart
+        if (isset($_SESSION['cart'][$product_id])) {
 
-        // Allow increase only if below stock limit
-        if ($_SESSION['cart'][$product_id]['quantity'] < $max_stock_limit) {
-
-            $_SESSION['cart'][$product_id]['quantity'] += 1;
+            // Allow increase only if below stock limit
+            if ($_SESSION['cart'][$product_id]['quantity'] < $max_stock_limit) {
+                $_SESSION['cart'][$product_id]['quantity'] += 1;
+            } else {
+                $order_error = "Stock limit reached. Only " . $max_stock_limit . " item(s) available.";
+            }
 
         } else {
-
-            $order_error = "Stock limit reached. Only " . $max_stock_limit . " item(s) available.";
-
+            // Add first item to cart
+            $_SESSION['cart'][$product_id] = [
+                'name' => $product['product_name'],
+                'price' => (float) $product['price'],
+                'quantity' => 1
+            ];
         }
+    }
 
-    } else {
-
-        // Add first item to cart
-        $_SESSION['cart'][$product_id] = [
-            'name' => $product['product_name'],
-            'price' => (float) $product['price'],
-            'quantity' => 1
-        ];
+    if (!isset($order_error)) {
+        header("Location: shop.php");
+        exit();
     }
 }
 
-    if (!isset($order_error)) {
-    header("Location: shop.php");
-    exit();
-}
-}
-
-// Remove from Cart action
+// ==========================================
+// 2. REMOVE FROM CART
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['remove_from_cart'])) {
 
     $product_id = (int) $_POST['product_id'];
@@ -96,12 +95,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['remove_from_cart'])) {
     exit();
 }
 
-// Order & Payment Placement
+// ==========================================
+// 3. CHECKOUT & PAYMENT PLACEMENT
+// ==========================================
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) && !empty($_SESSION['cart'])) {
 
     $payment_method = $_POST['payment_method'];
-
     $allowed_methods = ['Credit Card', 'Debit Card', 'FPX Online Banking'];
+    
     if (!in_array($payment_method, $allowed_methods, true)) {
         $order_error = "Invalid payment method selected.";
     } else {
@@ -111,13 +112,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) &&
         $postcode = trim($_POST['postcode']);
 
         try {
-            // Start transaction to keep order, stock, payment, and audit logging synchronized
+            // Start transaction
             $pdo->beginTransaction();
 
             $validated_cart = [];
             $total_amount = 0;
 
-            // Validate products and stock using database values
+            // Validate products and stock
             foreach ($_SESSION['cart'] as $product_id => $item) {
 
                 $product_id = (int) $product_id;
@@ -140,7 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) &&
                 $product = $product_stmt->fetch();
 
                 if (!$product || $product['quantity_available'] < $quantity) {
-                    throw new Exception("Stock unavailable");
+                    throw new Exception("Stock unavailable for " . htmlspecialchars($item['name']));
                 }
 
                 $unit_price = (float) $product['price'];
@@ -153,111 +154,45 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) &&
                 ];
             }
 
-            // 1. Handle Delivery Location
+            // Handle Delivery Location
             $loc_stmt = $pdo->prepare("SELECT location_id FROM location WHERE user_id = ? LIMIT 1");
             $loc_stmt->execute([$user_id]);
             $loc = $loc_stmt->fetch();
 
             if ($loc) {
                 $location_id = $loc['location_id'];
-
-                $upd_loc = $pdo->prepare("
-                    UPDATE location
-                    SET address_line = ?, city = ?, postcode = ?
-                    WHERE location_id = ?
-                    AND user_id = ?
-                ");
-
-                $upd_loc->execute([
-                    $address,
-                    $city,
-                    $postcode,
-                    $location_id,
-                    $user_id
-                ]);
-
+                $upd_loc = $pdo->prepare("UPDATE location SET address_line = ?, city = ?, postcode = ? WHERE location_id = ? AND user_id = ?");
+                $upd_loc->execute([$address, $city, $postcode, $location_id, $user_id]);
             } else {
-                $ins_loc = $pdo->prepare("
-                    INSERT INTO location 
-                    (user_id, address_line, city, postcode, is_default)
-                    VALUES (?, ?, ?, ?, 1)
-                ");
-
-                $ins_loc->execute([
-                    $user_id,
-                    $address,
-                    $city,
-                    $postcode
-                ]);
-
+                $ins_loc = $pdo->prepare("INSERT INTO location (user_id, address_line, city, postcode, is_default) VALUES (?, ?, ?, ?, 1)");
+                $ins_loc->execute([$user_id, $address, $city, $postcode]);
                 $location_id = $pdo->lastInsertId();
             }
 
-            // 2. Create main order record
-            $stmt = $pdo->prepare("
-                INSERT INTO orders 
-                (customer_id, location_id, total_amount, order_status)
-                VALUES (?, ?, ?, 'pending')
-            ");
-
-            $stmt->execute([
-                $user_id,
-                $location_id,
-                $total_amount
-            ]);
-
+            // Create main order record
+            $stmt = $pdo->prepare("INSERT INTO orders (customer_id, location_id, total_amount, order_status) VALUES (?, ?, ?, 'pending')");
+            $stmt->execute([$user_id, $location_id, $total_amount]);
             $order_id = $pdo->lastInsertId();
 
-            // 3. Insert order items and deduct stock
+            // Insert order items and deduct stock
             foreach ($validated_cart as $cart_item) {
+                $stmt = $pdo->prepare("INSERT INTO order_item (order_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)");
+                $stmt->execute([$order_id, $cart_item['product_id'], $cart_item['quantity'], $cart_item['unit_price']]);
 
-                $stmt = $pdo->prepare("
-                    INSERT INTO order_item 
-                    (order_id, product_id, quantity, unit_price)
-                    VALUES (?, ?, ?, ?)
-                ");
-
-                $stmt->execute([
-                    $order_id,
-                    $cart_item['product_id'],
-                    $cart_item['quantity'],
-                    $cart_item['unit_price']
-                ]);
-
-                $stock_stmt = $pdo->prepare("
-                    UPDATE inventory
-                    SET quantity_available = quantity_available - ?
-                    WHERE product_id = ?
-                    AND quantity_available >= ?
-                ");
-
-                $stock_stmt->execute([
-                    $cart_item['quantity'],
-                    $cart_item['product_id'],
-                    $cart_item['quantity']
-                ]);
+                $stock_stmt = $pdo->prepare("UPDATE inventory SET quantity_available = quantity_available - ? WHERE product_id = ? AND quantity_available >= ?");
+                $stock_stmt->execute([$cart_item['quantity'], $cart_item['product_id'], $cart_item['quantity']]);
 
                 if ($stock_stmt->rowCount() === 0) {
                     throw new Exception("Stock update failed");
                 }
             }
 
-            // 4. Populate Payment table
+            // Populate Payment table
             $transaction_ref = "TXN-" . date("Y") . "-" . str_pad(rand(1, 9999), 4, "0", STR_PAD_LEFT);
+            $pay_stmt = $pdo->prepare("INSERT INTO payment (order_id, payment_method, payment_status, transaction_reference, paid_at) VALUES (?, ?, 'paid', ?, CURRENT_TIMESTAMP)");
+            $pay_stmt->execute([$order_id, $payment_method, $transaction_ref]);
 
-            $pay_stmt = $pdo->prepare("
-                INSERT INTO payment 
-                (order_id, payment_method, payment_status, transaction_reference, paid_at)
-                VALUES (?, ?, 'paid', ?, CURRENT_TIMESTAMP)
-            ");
-
-            $pay_stmt->execute([
-                $order_id,
-                $payment_method,
-                $transaction_ref
-            ]);
-
-            // 5. Correct Audit Logging
+            // SUCCESS AUDIT LOGGING
             logAudit(
                 $pdo,
                 $user_id,
@@ -271,7 +206,18 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) &&
             $order_success = "Payment Successful! Order #$order_id has been securely verified.";
 
         } catch (Exception $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            
+            // FAILURE AUDIT LOGGING
+            logAudit(
+                $pdo, 
+                $user_id, 
+                'ORDER_FAILED', 
+                'Customer checkout failed: ' . $e->getMessage()
+            );
+            
             $order_error = "Payment processing failed. Please check stock availability and try again.";
         }
     }
@@ -279,7 +225,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['process_checkout']) &&
 
 // Fetch current user location to pre-fill the delivery form
 $current_loc = null;
-
 $loc_stmt = $pdo->prepare("SELECT * FROM location WHERE user_id = ? LIMIT 1");
 $loc_stmt->execute([$user_id]);
 $current_loc = $loc_stmt->fetch();
@@ -290,7 +235,6 @@ $current_loc = $loc_stmt->fetch();
 <meta charset="UTF-8">
 <title>ShopEasy - Shop</title>
 <style>
-  /* original UI CSS exactly intact */
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; background: #f0f2f5; }
   nav { background: #1a1a2e; padding: 12px 30px; display: flex; justify-content: space-between; align-items: center; }
@@ -314,7 +258,6 @@ $current_loc = $loc_stmt->fetch();
   .add-btn:hover { background: #185FA5; color: #fff; }
   .add-btn:disabled { border-color: #ccc; color: #aaa; cursor: not-allowed; }
   
-  /* Cart sidebar panel features */
   .cart-box { background: #fff; border: 1px solid #ddd; border-radius: 10px; padding: 16px; position: sticky; top: 20px; text-align: left; }
   .cart-title { font-size: 15px; font-weight: bold; color: #1a1a2e; margin-bottom: 14px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
   .cart-item { display: flex; justify-content: space-between; font-size: 13px; padding: 7px 0; border-bottom: 1px solid #eee; color: #333; }
@@ -326,7 +269,6 @@ $current_loc = $loc_stmt->fetch();
   .success-msg { background: #d4edda; color: #155724; padding: 10px; border-radius: 6px; font-size: 13px; margin-bottom: 15px; text-align: center; border: 1px solid #c3e6cb;}
   .error-msg { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 6px; font-size: 13px; margin-bottom: 15px; text-align: center; border: 1px solid #f5c6cb;}
   
-  /* Added payment interface form rules */
   .pay-input { width: 100%; padding: 6px 10px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 8px; margin-top: 2px; display: block; background: #fafafa; color: #333; }
   .pay-label { font-size: 11px; color: #555; font-weight: bold; text-transform: uppercase; display: block; margin-top: 6px; }
 </style>
