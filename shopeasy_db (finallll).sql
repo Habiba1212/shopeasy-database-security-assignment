@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: May 24, 2026 at 10:42 PM
+-- Generation Time: May 24, 2026 at 11:11 PM
 -- Server version: 10.4.32-MariaDB
 -- PHP Version: 8.2.12
 
@@ -28,6 +28,15 @@ SET time_zone = "+00:00";
 --
 
 DROP TABLE IF EXISTS `audit_log`;
+-- CREATE DATABASE USER FOR LECTURER TESTING
+CREATE USER IF NOT EXISTS 'shopeasy_app'@'localhost' IDENTIFIED BY 'StrongPassword123!';
+GRANT ALL PRIVILEGES ON shopeasy_db.* TO 'shopeasy_app'@'localhost';
+FLUSH PRIVILEGES;
+
+-- Ensure the database exists and use it
+CREATE DATABASE IF NOT EXISTS shopeasy_db;
+USE shopeasy_db;
+
 CREATE TABLE `audit_log` (
   `log_id` int(11) NOT NULL,
   `user_id` int(11) NOT NULL,
@@ -122,7 +131,7 @@ CREATE TABLE `delivery` (
 INSERT INTO `delivery` (`delivery_id`, `order_id`, `driver_id`, `location_id`, `delivery_status`, `assigned_at`, `delivered_at`) VALUES
 (3, 1, 13, 1, 'delivered', '2026-05-24 16:42:41', NULL),
 (4, 5, 13, 2, 'delivered', '2026-05-24 18:26:12', NULL),
-(5, 6, 13, 2, '', '2026-05-24 18:53:48', NULL);
+(5, 6, 13, 2, 'assigned', '2026-05-24 18:53:48', NULL);
 
 -- --------------------------------------------------------
 
@@ -330,9 +339,9 @@ CREATE TABLE `user` (
 --
 
 INSERT INTO `user` (`user_id`, `full_name`, `email`, `password_hash`, `phone`, `account_status`, `failed_login_attempts`, `last_login`, `password_updated_at`, `created_at`, `phone_number`, `reset_token`, `token_expires_at`) VALUES
-(1, 'Admin', 'admin@shopeasy.com', '$2y$10$wJFxmEDv0jkiq2cg1TEUIO4G5QIw0zLppYEnRI1Af3SeWoz4pQTW6', '0123456789', 'active', 4, NULL, NULL, '2026-05-07 15:34:48', NULL, NULL, NULL),
+(1, 'Admin', 'admin@shopeasy.com', '$2y$10$wJFxmEDv0jkiq2cg1TEUIO4G5QIw0zLppYEnRI1Af3SeWoz4pQTW6', '0123456789', 'active', 0, NULL, NULL, '2026-05-07 15:34:48', NULL, NULL, NULL),
 (2, 'Habeba Nader', 'habeba@hotmail.com', '$2y$10$wJFxmEDv0jkiq2cg1TEUIO4G5QIw0zLppYEnRI1Af3SeWoz4pQTW6', '0112233445', 'active', 0, NULL, NULL, '2026-05-07 15:38:55', NULL, NULL, NULL),
-(3, 'Ali', 'driver@shopeasy.com', '$2y$10$wJFxmEDv0jkiq2cg1TEUIO4G5QIw0zLppYEnRI1Af3SeWoz4pQTW6', '0198877665', 'active', 3, NULL, NULL, '2026-05-07 15:39:42', NULL, NULL, NULL),
+(3, 'Ali', 'driver@shopeasy.com', '$2y$10$wJFxmEDv0jkiq2cg1TEUIO4G5QIw0zLppYEnRI1Af3SeWoz4pQTW6', '0198877665', 'active', 0, NULL, NULL, '2026-05-07 15:39:42', NULL, NULL, NULL),
 (11, 'Fiqa Fiqa', 'fiqa@gmail.com', '$2y$10$Lwg7rd8rvvF5DxVY71wzZecfpHkgGIArBgHjQCNSHNQdmc2RZP2nu', '0108645509', 'active', 0, '2026-05-24 19:18:34', NULL, '2026-05-24 16:13:11', NULL, NULL, NULL),
 (12, 'Admin', 'admin2@shopeasy.com', '$2y$10$2BFld/xs7fyNEEy0mmM9OeNULu2JqT2XbP4dwGJfptALMCrpR6p9S', '0112233445', 'active', 0, '2026-05-24 19:22:11', NULL, '2026-05-24 16:16:18', NULL, NULL, NULL),
 (13, 'Zakwan', 'driver2@shopeasy.com', '$2y$10$Gs7iTp6kY6drW1la9bXTE.tnfs3KSB5qokf6Lq3SO2cqkjjAVny3S', '0123456788', 'active', 0, '2026-05-24 19:10:10', NULL, '2026-05-24 16:41:23', NULL, NULL, NULL);
@@ -571,3 +580,4 @@ COMMIT;
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+
