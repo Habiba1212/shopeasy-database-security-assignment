@@ -30,7 +30,7 @@ SET time_zone = "+00:00";
 DROP TABLE IF EXISTS `audit_log`;
 -- CREATE DATABASE USER FOR LECTURER TESTING
 CREATE USER IF NOT EXISTS 'shopeasy_app'@'localhost' IDENTIFIED BY 'StrongPassword123!';
-GRANT ALL PRIVILEGES ON shopeasy_db.* TO 'shopeasy_app'@'localhost';
+GRANT SELECT, INSERT, UPDATE, DELETE ON shopeasy_db.* TO 'shopeasy_app'@'localhost';
 FLUSH PRIVILEGES;
 
 -- Ensure the database exists and use it
