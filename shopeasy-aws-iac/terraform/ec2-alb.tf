@@ -136,8 +136,29 @@ resource "aws_launch_template" "shopeasy_lt" {
     #!/bin/bash
     set -e
 
-    dnf install -y httpd php php-pdo php-mysqlnd git mariadb105
+    dnf install -y httpd php php-pdo php-mysqlnd git mariadb105 awscli
     systemctl enable httpd
+
+    SECRET_JSON=$(aws secretsmanager get-secret-value \
+      --region ${var.aws_region} \
+      --secret-id ${aws_secretsmanager_secret.rds_credentials.name} \
+      --query SecretString \
+      --output text)
+    export SECRET_JSON
+
+    DB_HOST=$(python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["host"])')
+    DB_NAME=$(python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["dbname"])')
+    DB_USER=$(python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["username"])')
+    DB_PASSWORD=$(python3 -c 'import json, os; print(json.loads(os.environ["SECRET_JSON"])["password"])')
+
+    cat > /etc/httpd/conf.d/shopeasy-env.conf <<APACHE_ENV
+    SetEnv DB_HOST "$DB_HOST"
+    SetEnv DB_NAME "$DB_NAME"
+    SetEnv DB_USER "$DB_USER"
+    SetEnv DB_PASSWORD "$DB_PASSWORD"
+    APACHE_ENV
+
+    chmod 600 /etc/httpd/conf.d/shopeasy-env.conf
 
     rm -rf /opt/shopeasy
     git clone https://github.com/Habiba1212/shopeasy-database-security-assignment.git /opt/shopeasy
@@ -158,7 +179,6 @@ resource "aws_launch_template" "shopeasy_lt" {
     </html>
     PHP
 
-    sed -i "s/127.0.0.1/shopeasy-rds-mysql.ccl420w8eagx.us-east-1.rds.amazonaws.com/g" /var/www/html/db_connect.php
     chown -R apache:apache /var/www/html
     find /var/www/html -type f -exec chmod 0644 {} \;
 
@@ -177,10 +197,10 @@ resource "aws_launch_template" "shopeasy_lt" {
 
 # Auto Scaling Group across private app subnets
 resource "aws_autoscaling_group" "shopeasy_asg" {
-  name                = "${var.project_name}-asg"
-  min_size            = 2
-  max_size            = 2
-  desired_capacity    = 2
+  name             = "${var.project_name}-asg"
+  min_size         = 2
+  max_size         = 2
+  desired_capacity = 2
   vpc_zone_identifier = [
     aws_subnet.private_app_az1.id,
     aws_subnet.private_app_az2.id
