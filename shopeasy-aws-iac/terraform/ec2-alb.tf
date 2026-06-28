@@ -134,19 +134,35 @@ resource "aws_launch_template" "shopeasy_lt" {
 
   user_data = base64encode(<<-EOF
     #!/bin/bash
-    cat > /home/ec2-user/index.html <<'HTML'
+    set -e
+
+    dnf install -y httpd php php-pdo php-mysqlnd git mariadb105
+    systemctl enable httpd
+
+    rm -rf /opt/shopeasy
+    git clone https://github.com/Habiba1212/shopeasy-database-security-assignment.git /opt/shopeasy
+
+    rm -rf /var/www/html/*
+    find /opt/shopeasy -maxdepth 1 -type f -name '*.php' -exec cp {} /var/www/html/ \;
+
+    cat > /var/www/html/index.php <<'PHP'
+    <?php http_response_code(200); ?>
+    <!doctype html>
     <html>
-      <head><title>ShopEasy AWS</title></head>
+      <head><title>ShopEasy</title></head>
       <body>
-        <h1>ShopEasy Application Server</h1>
-        <p>This EC2 instance is running inside a private app subnet.</p>
-        <p>Traffic reaches this server only through the Application Load Balancer.</p>
+        <h1>ShopEasy Application</h1>
+        <p>Application server is healthy.</p>
+        <p><a href="/shop.php">Open ShopEasy</a></p>
       </body>
     </html>
-    HTML
+    PHP
 
-    cd /home/ec2-user
-    nohup python3 -m http.server 80 --bind 0.0.0.0 > /var/log/shopeasy-http.log 2>&1 &
+    sed -i "s/127.0.0.1/shopeasy-rds-mysql.ccl420w8eagx.us-east-1.rds.amazonaws.com/g" /var/www/html/db_connect.php
+    chown -R apache:apache /var/www/html
+    find /var/www/html -type f -exec chmod 0644 {} \;
+
+    systemctl restart httpd
   EOF
   )
 

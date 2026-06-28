@@ -67,10 +67,19 @@ resource "aws_network_acl" "private_app_nacl" {
   }
 
   ingress {
-    rule_no    = 110
+    rule_no    = 105
     protocol   = "tcp"
     action     = "allow"
     cidr_block = "10.0.0.0/16"
+    from_port  = 443
+    to_port    = 443
+  }
+
+  ingress {
+    rule_no    = 110
+    protocol   = "tcp"
+    action     = "allow"
+    cidr_block = "0.0.0.0/0"
     from_port  = 1024
     to_port    = 65535
   }

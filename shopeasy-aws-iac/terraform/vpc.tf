@@ -91,6 +91,26 @@ resource "aws_subnet" "private_db_az2" {
   }
 }
 
+# NAT Gateway for outbound internet access from private app instances
+resource "aws_eip" "nat_eip" {
+  domain = "vpc"
+
+  tags = {
+    Name = "${var.project_name}-nat-eip"
+  }
+}
+
+resource "aws_nat_gateway" "shopeasy_nat" {
+  allocation_id = aws_eip.nat_eip.id
+  subnet_id     = aws_subnet.public_az1.id
+
+  tags = {
+    Name = "${var.project_name}-nat-gateway"
+  }
+
+  depends_on = [aws_internet_gateway.shopeasy_igw]
+}
+
 # Public Route Table
 resource "aws_route_table" "public_rt" {
   vpc_id = aws_vpc.shopeasy_vpc.id
@@ -116,16 +136,31 @@ resource "aws_route_table_association" "public_az2_assoc" {
   route_table_id = aws_route_table.public_rt.id
 }
 
-# Private Route Table for app and DB subnets
+# Private Route Table for app subnets
 resource "aws_route_table" "private_rt" {
   vpc_id = aws_vpc.shopeasy_vpc.id
 
   tags = {
-    Name = "${var.project_name}-private-route-table"
+    Name = "${var.project_name}-private-app-route-table"
   }
 }
 
-# Associate private app and DB subnets with private route table
+resource "aws_route" "private_app_outbound_internet" {
+  route_table_id         = aws_route_table.private_rt.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.shopeasy_nat.id
+}
+
+# Private Route Table for database subnets, intentionally without internet default route
+resource "aws_route_table" "private_db_rt" {
+  vpc_id = aws_vpc.shopeasy_vpc.id
+
+  tags = {
+    Name = "${var.project_name}-private-db-route-table"
+  }
+}
+
+# Associate private app subnets with NAT-enabled private app route table
 resource "aws_route_table_association" "private_app_az1_assoc" {
   subnet_id      = aws_subnet.private_app_az1.id
   route_table_id = aws_route_table.private_rt.id
@@ -138,10 +173,10 @@ resource "aws_route_table_association" "private_app_az2_assoc" {
 
 resource "aws_route_table_association" "private_db_az1_assoc" {
   subnet_id      = aws_subnet.private_db_az1.id
-  route_table_id = aws_route_table.private_rt.id
+  route_table_id = aws_route_table.private_db_rt.id
 }
 
 resource "aws_route_table_association" "private_db_az2_assoc" {
   subnet_id      = aws_subnet.private_db_az2.id
-  route_table_id = aws_route_table.private_rt.id
+  route_table_id = aws_route_table.private_db_rt.id
 }
